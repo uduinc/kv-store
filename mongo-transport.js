@@ -14,7 +14,7 @@ var DOT_SEPARATOR_REPLACEMENT = '|_DOT_SEPARATOR_|';
 
 function MongoTransport ( opts ) {
 	opts = opts || {};
-	opts.dependencyInterval = opts.dependencyInterval || 60000;
+	opts.dependencyInterval = opts.dependencyInterval || 3600000;
 	Transport.call( this, opts );
 
 	var self = this;

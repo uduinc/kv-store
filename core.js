@@ -15,7 +15,7 @@ function KVStore ( transports ) {
 	self.priorityList = [];
 
 	self.on( 'error', function ( err ) {
-		console.error( 'Error in KVStore ->', err );
+		console.error( 'Error in KVStore ->', err, '-----', err.stack );
 	});
 
 	_.each( transports, function ( v, k ) {
@@ -32,7 +32,7 @@ KVStore.prototype.addTransport = function ( name, transport ) {
 
 	this.transports[ name ] = transport;
 	transport.on( 'error', function ( err ) {
-		console.error( 'Error in KVStore[', name, '] ->', err );
+		console.error( 'Error in KVStore[', name, '] ->', err, '-----', err.stack );
 	});
 	var priorityIndex = _.findIndex( this.priorityList, function ( t ) {
 		return t.priority > transport.priority;
