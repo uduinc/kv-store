@@ -32,7 +32,7 @@ KVStore.prototype.addTransport = function ( name, transport ) {
 
 	this.transports[ name ] = transport;
 	transport.on( 'error', function ( err ) {
-		console.error( 'Error in KVStore[', name, '] ->', err.stack );
+		console.error( 'Error in KVStore[', name, '] ->', err );
 	});
 	var priorityIndex = _.findIndex( this.priorityList, function ( t ) {
 		return t.priority > transport.priority;
@@ -97,6 +97,8 @@ KVStore.prototype.delete = function ( k, opts, cb ) {
 	if ( typeof opts === 'function' ) {
 		cb = opts;
 		opts = {};
+	} else if ( !opts ) {
+		opts = {};
 	}
 
 	if ( typeof k !== 'string' ) {
@@ -133,11 +135,13 @@ KVStore.prototype.delete = function ( k, opts, cb ) {
 	});
 };
 
-KVStore.prototype.deleteByMeta = function ( meta, opts, cb ) {
+KVStore.prototype.deleteBy = function ( search, opts, cb ) {
 	var self = this;
 
 	if ( typeof opts === 'function' ) {
 		cb = opts;
+		opts = {};
+	} else if ( !opts ) {
 		opts = {};
 	}
 
@@ -167,8 +171,12 @@ KVStore.prototype.deleteByMeta = function ( meta, opts, cb ) {
 		if ( opts.transportExclusions && ~opts.transportExclusions.indexOf( transport.name ) ) {
 			return callback( );
 		}
-		transport.__deleteByMeta( meta, callback );
+		transport.__deleteBy( search, callback );
 	});
+};
+
+KVStore.prototype.deleteByMeta = function ( meta, opts, cb ) {
+	this.deleteBy( { meta: meta }, opts, cb );
 };
 
 KVStore.prototype.get = function ( k, opts, cb ) {
@@ -176,6 +184,8 @@ KVStore.prototype.get = function ( k, opts, cb ) {
 
 	if ( typeof opts === 'function' ) {
 		cb = opts;
+		opts = {};
+	} else if ( !opts ) {
 		opts = {};
 	}
 
@@ -221,6 +231,8 @@ KVStore.prototype.getAll = function ( keys, opts, cb ) {
 	if ( typeof opts === 'function' ) {
 		cb = opts;
 		opts = {};
+	} else if ( !opts ) {
+		opts = {};
 	}
 
 	keys = _.map( keys, function ( k ) {
@@ -260,6 +272,8 @@ KVStore.prototype.findByMeta = function ( meta, opts, cb ) {
 
 	if ( typeof opts === 'function' ) {
 		cb = opts;
+		opts = {};
+	} else if ( !opts ) {
 		opts = {};
 	}
 

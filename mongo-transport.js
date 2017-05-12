@@ -109,11 +109,14 @@ MongoTransport.prototype.checkOneDependent = function ( dependencies, cb ) {
 };
 
 var flatten = function ( obj, prefix ) {
+	if ( !obj || typeof obj !== 'object' || Array.isArray( obj ) || obj instanceof RegExp || obj instanceof Date ) {
+		return obj;
+	}
 	prefix = prefix ? prefix + '.' : '';
 	var newObj = {};
 	_.each( obj, function ( v, k ) {
 		k = k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT );
-		if ( v && typeof v === 'object' && !( v instanceof RegExp || v instanceof Date ) ) {
+		if ( v && typeof v === 'object' && !( Array.isArray( v ) || v instanceof RegExp || v instanceof Date ) ) {
 			_.merge( newObj, flatten( v, prefix + k ) )
 		} else {
 			newObj[ prefix + k ] = v;
@@ -122,9 +125,23 @@ var flatten = function ( obj, prefix ) {
 	return newObj;
 };
 
+var escapeDots = function ( obj ) {
+	if ( !obj || typeof obj !== 'object' || Array.isArray( obj ) || obj instanceof RegExp || obj instanceof Date ) {
+		return obj;
+	}
+	var newObj = {};
+	_.each( obj, function ( v, k ) {
+		newObj[ k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT ) ] = escapeDots( obj[ k ] );
+	});
+	return newObj;
+};
+
 var unescapeDots = function ( obj ) {
+	if ( !obj || typeof obj !== 'object' || Array.isArray( obj ) || obj instanceof RegExp || obj instanceof Date ) {
+		return obj;
+	}
 	return _.transform( obj, function ( result, v, k ) {
-		if ( v && typeof v === 'object' && !( v instanceof RegExp || v instanceof Date ) ) {
+		if ( v && typeof v === 'object' && !( Array.isArray( v ) || v instanceof RegExp || v instanceof Date ) ) {
 			result[ k.split( DOT_SEPARATOR_REPLACEMENT ).join( '.' ) ] = unescapeDots( v );
 		} else {
 			result[ k.split( DOT_SEPARATOR_REPLACEMENT ).join( '.' ) ] = v;
@@ -135,7 +152,7 @@ var unescapeDots = function ( obj ) {
 
 MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 	var self = this;
-	var obj = flatten( { key: k, value: v } );
+	var obj = { key: k, value: escapeDots( v ) };
 	if ( opts.expiration ) {
 		obj.expiration = new Date( opts.expiration );
 	} else if ( opts.ttl ) {
@@ -209,7 +226,7 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 		});
 
 		self.checkOneDependent( obj.dependencies, function ( err, allowed ) {
-			if ( err ) {
+			if ( err ) {g
 				return cb( err );
 			} else if ( !allowed ) {
 				var err = new Error( 'Could not insert; dependency not met.' );
@@ -362,27 +379,8 @@ MongoTransport.prototype.delete = function ( k, cb ) {
 	});
 };
 
-MongoTransport.prototype.deleteByMeta = function ( search, cb ) {
-	var self = this;
-	self.findByMeta( search, function ( err, data ) {
-		if ( err || !data || !_.size( data ) ) {
-			return cb( err );
-		}
-
-		var keys = _.keys( data );
-		var numWaiting = keys.length;
-		var totalErr = null;
-		_.each( keys, function ( k ) {
-			self.delete( k, function ( err ) {
-				if ( err ) {
-					totalErr = err;
-				}
-				if ( !( --numWaiting ) ) {
-					cb( totalErr );
-				}
-			});
-		});
-	});
+MongoTransport.prototype.deleteBy = function ( search, cb ) {
+	this.collection.remove( flatten( search ), cb );
 };
 
 MongoTransport.prototype.checkDependencies = function ( ) {

@@ -73,21 +73,21 @@ RamTransport.prototype.delete = function ( k, cb ) {
 	}
 };
 
-RamTransport.prototype.deleteByMeta = function ( search, cb ) {
+RamTransport.prototype.deleteBy = function ( search, cb ) {
 	var self = this;
 	var keys = _.keys( self.storage );
 	var numKeys = keys.length;
-	( function deleteByMetaInternal ( idx ) {
+	( function deleteByInternal ( idx ) {
 		var stop = idx + 100;
 		for ( var i=idx; i<stop && i<numKeys; i++ ) {
 			var key = keys[ i ];
-			if ( self.storage[ key ] && _.isMatch( self.storage[ key ].meta, search ) ) {
+			if ( self.storage[ key ] && _.isMatch( self.storage[ key ], search ) ) {
 				self.delete( key );
 			}
 		}
 		if ( i < numKeys ) {
 			setImmediate( function ( ) {
-				deleteByMetaInternal( stop );
+				deleteByInternal( stop );
 			});
 		} else if ( cb ) {
 			cb( );

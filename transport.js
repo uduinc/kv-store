@@ -39,15 +39,15 @@ Transport.prototype.__set = function ( k, v, opts, cb ) {
 	});
 };
 
-Transport.prototype.__deleteByMeta = function ( meta, cb ) {
+Transport.prototype.__deleteBy = function ( meta, cb ) {
 	var self = this;
 
 	if ( !self.ready ) {
 		return cb( 'Transport not ready.' );
 	}
-	if ( typeof self.deleteByMeta === 'function' ) {
+	if ( typeof self.deleteBy === 'function' ) {
 		self.__numWaiting++;
-		self.deleteByMeta( meta, function ( err ) {
+		self.deleteBy( meta, function ( err ) {
 			self.__numWaiting--;
 			if ( self.empty ) {
 				self.emit( 'empty' );
