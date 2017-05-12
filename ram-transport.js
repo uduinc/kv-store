@@ -23,7 +23,7 @@ util.inherits( RamTransport, Transport );
 RamTransport.prototype.set = function ( k, v, opts, cb ) {
 	if ( utils.dataSize( v ) < this.maxDataSize ) {
 		this.unsetTimer( k );
-		this.storage[ k ] = { value: v };
+		this.storage[ k ] = { value: v, meta: opts.meta || {} };
 		this.setTimer( k );
 	}
 	if ( cb ) {
@@ -39,7 +39,7 @@ RamTransport.prototype.get = function ( k, cb ) {
 		process.nextTick( function ( ) {
 			// console.log( 'RAM>', self.storage[ k ].value );
 			// console.log( 'RAM> FOUND' );
-			cb( null, _.cloneDeep( self.storage[ k ].value ) );
+			cb( null, _.cloneDeep( self.storage[ k ].value ), k, _.cloneDeep( self.storage[ k ].meta ) );
 		});
 	} else {
 		process.nextTick( function ( ) {
@@ -81,7 +81,7 @@ RamTransport.prototype.deleteByMeta = function ( search, cb ) {
 		var stop = idx + 100;
 		for ( var i=idx; i<stop && i<numKeys; i++ ) {
 			var key = keys[ i ];
-			if ( _.isMatch( self.storage[ key ], search ) ) {
+			if ( self.storage[ key ] && _.isMatch( self.storage[ key ].meta, search ) ) {
 				self.delete( key );
 			}
 		}

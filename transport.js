@@ -68,14 +68,17 @@ Transport.prototype.__get = function ( k, cb ) {
 	if ( !self.ready ) {
 		return cb( 'Transport not ready.' );
 	}
-	self.get( k, function ( err, value, key ) {
+	self.get( k, function ( err, value, key, meta ) {
 		if ( err ) {
 			self.emit( 'error', err );
 		}
 		if ( typeof value !== 'undefined' && !key ) {
 			key = k;
 		}
-		cb( err, value, key );
+		if ( typeof value !== 'undefined' && !meta ) {
+			meta = {};
+		}
+		cb( err, value, key, meta );
 	});
 };
 

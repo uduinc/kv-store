@@ -112,6 +112,7 @@ var flatten = function ( obj, prefix ) {
 	prefix = prefix ? prefix + '.' : '';
 	var newObj = {};
 	_.each( obj, function ( v, k ) {
+		k = k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT );
 		if ( v && typeof v === 'object' && !( v instanceof RegExp || v instanceof Date ) ) {
 			_.merge( newObj, flatten( v, prefix + k ) )
 		} else {
@@ -121,10 +122,20 @@ var flatten = function ( obj, prefix ) {
 	return newObj;
 };
 
+var unescapeDots = function ( obj ) {
+	return _.transform( obj, function ( result, v, k ) {
+		if ( v && typeof v === 'object' && !( v instanceof RegExp || v instanceof Date ) ) {
+			result[ k.split( DOT_SEPARATOR_REPLACEMENT ).join( '.' ) ] = unescapeDots( v );
+		} else {
+			result[ k.split( DOT_SEPARATOR_REPLACEMENT ).join( '.' ) ] = v;
+		}
+	});
+};
+
 
 MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 	var self = this;
-	var obj = { key: k, value: v };
+	var obj = flatten( { key: k, value: v } );
 	if ( opts.expiration ) {
 		obj.expiration = new Date( opts.expiration );
 	} else if ( opts.ttl ) {
@@ -216,7 +227,7 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 	}
 };
 
-MongoTransport.prototype.getPieces = function ( pieces, cb ) {
+MongoTransport.prototype.getPieces = function ( pieces, cb, key, meta ) {
 	self.collection.find( { key: { $in: pieces } }, function ( err, cursor ) {
 		if ( err ) {
 			// console.log( 'DB > ERR' );
@@ -234,7 +245,7 @@ MongoTransport.prototype.getPieces = function ( pieces, cb ) {
 			if ( !piece ) {
 				if ( piecesFound === pieces.length ) {
 					// console.log( 'DB > FOUND' );
-					return cb( null, JSON.parse( pieces.join( '' ) ) );
+					return cb( null, unescapeDots( JSON.parse( pieces.join( '' ) ) ), key, meta );
 				} else {
 					var err = new Error( 'Incomplete data found.' );
 					err.key = k;
@@ -263,11 +274,11 @@ MongoTransport.prototype.get = function ( k, cb ) {
 			cb( err );
 		} else {
 			if ( data.piece_split ) {
-				self.getPieces( data.value, cb );
+				self.getPieces( data.value, cb, k, data.meta );
 			} else {
 				// console.log( 'DB >', data.value );
 				// console.log( 'DB > FOUND' );
-				cb( err, data.value );
+				cb( err, unescapeDots( data.value ), k, data.meta );
 			}
 		}
 	});

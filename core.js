@@ -15,7 +15,7 @@ function KVStore ( transports ) {
 	self.priorityList = [];
 
 	self.on( 'error', function ( err ) {
-		console.error( 'Error in KVStore ->', err, '-----', err.stack );
+		console.error( 'Error in KVStore ->', err.stack );
 	});
 
 	_.each( transports, function ( v, k ) {
@@ -32,7 +32,7 @@ KVStore.prototype.addTransport = function ( name, transport ) {
 
 	this.transports[ name ] = transport;
 	transport.on( 'error', function ( err ) {
-		console.error( 'Error in KVStore[', name, '] ->', err, '-----', err.stack );
+		console.error( 'Error in KVStore[', name, '] ->', err.stack );
 	});
 	var priorityIndex = _.findIndex( this.priorityList, function ( t ) {
 		return t.priority > transport.priority;
@@ -49,6 +49,8 @@ KVStore.prototype.set = function ( k, v, opts, cb ) {
 
 	if ( typeof opts === 'function' ) {
 		cb = opts;
+		opts = {};
+	} else if ( !opts ) {
 		opts = {};
 	}
 
@@ -194,15 +196,15 @@ KVStore.prototype.get = function ( k, opts, cb ) {
 		if ( opts.transportExclusions && ~opts.transportExclusions.indexOf( transport.name ) ) {
 			return getNext( i+1 );
 		}
-		transport.__get( k, function ( err, value, key ) {
+		transport.__get( k, function ( err, value, key, meta ) {
 			if ( err ) {
 				self.emit( 'error', err );
 			}
 			if ( value ) {
 				_.each( pullers, function ( t ) {
-					t.__set( key, value, { pulled: true } );
+					t.__set( key, value, { meta: meta, pulled: true } );
 				});
-				cb( err, value, key );
+				cb( err, value, key, meta );
 			} else {
 				if ( transport.pull ) {
 					pullers.push( transport );
