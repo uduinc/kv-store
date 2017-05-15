@@ -235,6 +235,8 @@ KVStore.prototype.getAll = function ( keys, opts, cb ) {
 		opts = {};
 	}
 
+	console.log( '~~~ getAll', opts );
+
 	keys = _.map( keys, function ( k ) {
 		if ( typeof k !== 'string' ) {
 			return 'k_' + utils.hash( k );
@@ -250,9 +252,11 @@ KVStore.prototype.getAll = function ( keys, opts, cb ) {
 
 		var transport = self.priorityList[ i ];
 		if ( opts.transports && !~opts.transports.indexOf( transport.name ) ) {
+			console.log( '<> inclusions: skipping', transport.name );
 			return getNext( i+1 );
 		}
 		if ( opts.transportExclusions && ~opts.transportExclusions.indexOf( transport.name ) ) {
+			console.log( '<> exclusions: skipping', transport.name );
 			return getNext( i+1 );
 		}
 		transport.__getAll( keys, function ( err, v ) {
@@ -260,6 +264,7 @@ KVStore.prototype.getAll = function ( keys, opts, cb ) {
 				self.emit( 'error', err );
 			}
 			if ( v && !_.isEmpty( v ) ) {
+				console.log( '>>>> found', _.size( v ), 'results from', transport.name );
 				values = _.assign( {}, v, values );
 			}
 			getNext( i+1 );
