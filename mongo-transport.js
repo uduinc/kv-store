@@ -80,6 +80,12 @@ MongoTransport.prototype.checkOneDependent = function ( dependencies, cb ) {
 	_.each( dependencies, function ( dv, dk ) {
 		if ( abort || !allowed ) return false;
 
+		if ( dk === 'KV_KEEP_ALIVE' && dv ) {
+			cb( null, true );
+			abort = true;
+			return false;
+		}
+
 		var spl = dk.split( DOT_SEPARATOR_REPLACEMENT );
 		var collection = self.db.collection( spl.shift( ) );
 
@@ -240,6 +246,7 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 			setInternal( );
 		});
 	} else {
+		obj.dependencies = { 'KV_KEEP_ALIVE': true };
 		setInternal( );
 	}
 };
