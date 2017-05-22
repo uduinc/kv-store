@@ -1,4 +1,5 @@
 var util = require( 'util' );
+var EventEmitter = require( 'events' ).EventEmitter;
 
 var _ = require( 'lodash' );
 var mongo = require( 'mongodb' ).MongoClient;
@@ -21,6 +22,7 @@ function MongoTransport ( opts ) {
 
 	self.maxObjectSize = opts.maxObjectSize || 14000000;
 	self.pieceLength = Math.min( self.maxObjectSize, opts.pieceSize || 10000000 ) / 2;
+	self.dependencyGracePeriod = opts.dependencyGracePeriod || 5000;
 
 	if ( opts.collection ) {
 		self.collectionName = opts.collection;
@@ -77,6 +79,9 @@ MongoTransport.prototype.checkOneDependent = function ( dependencies, cb ) {
 	var allowed = true;
 	var abort = false;
 
+	var searches = {};
+
+
 	_.each( dependencies, function ( dv, dk ) {
 		if ( abort || !allowed ) return false;
 
@@ -92,7 +97,7 @@ MongoTransport.prototype.checkOneDependent = function ( dependencies, cb ) {
 		var search = {};
 		search[ spl.join( '.' ) ] = dv;
 
-		// console.log( 'Checking dependency:', search );
+		console.log( 'Checking dependency:', search );
 
 		collection.count( search, function ( err, count ) {
 			if ( err ) {
@@ -231,10 +236,16 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 			return k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT );
 		});
 
-		self.checkOneDependent( obj.dependencies, function ( err, allowed ) {
-			if ( err ) {g
-				return cb( err );
-			} else if ( !allowed ) {
+		var dependencyChecker = new MongoDependencyCheck( self.db, self.dependencyGracePeriod );
+		dependencyChecker.on( 'error', self.emit.bind( self, 'error' ) );
+
+		var gotCB = false;
+		dependencyChecker.addDependencyCheck( obj.dependencies, function ( allowed ) {
+			if ( gotCB ) return;
+			gotCB = true;
+			if ( allowed ) {
+				setInternal( );
+			} else {
 				var err = new Error( 'Could not insert; dependency not met.' );
 				err.meta = {
 					key: k,
@@ -242,9 +253,20 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 				};
 				return cb( err );
 			}
-
-			setInternal( );
 		});
+
+		dependencyChecker.on( 'destroy', function ( ) {
+			if ( gotCB ) return;
+			gotCB = true;
+			var err = new Error( 'Error checking dependencies when inserting.' );
+			err.meta = {
+				key: k,
+				dependencies: opts.dependencies
+			};
+			return cb( err );
+		});
+
+		dependencyChecker.run( );
 	} else {
 		obj.dependencies = { 'KV_KEEP_ALIVE': true };
 		setInternal( );
@@ -390,72 +412,246 @@ MongoTransport.prototype.deleteBy = function ( search, cb ) {
 	this.collection.remove( flatten( search ), cb );
 };
 
-MongoTransport.prototype.checkDependencies = function ( ) {
+MongoTransport.prototype.checkDependencies = function ( cb ) {
+	cb = cb || function ( ) { };
 	var self = this;
 	// console.log( '~~~ checking dependencies' );
-	self.collection.find( { dependencies: { $exists: true, $ne: [] } }, { key: 1, dependencies: 1, _id: 0 }, function ( err, cursor ) {
+	var cursor = self.collection.find( { dependencies: { $exists: true, $ne: [] } }, { key: 1, dependencies: 1, _id: 0 } );
+	var abort = false;
+	var hadAny = false;
+	var hadFailures = false;
+	var remaining = 0;
+	var batch = self.collection.initializeUnorderedBulkOp( );
+	var keysToRemove = [];
+
+	var checker = new MongoDependencyCheck( self.db, self.dependencyGracePeriod );
+	checker.on( 'error', self.emit.bind( self, 'error' ) );
+	checker.on( 'destroy', cb );
+
+	var checkDone = function ( ) {
+		if ( !( --remaining ) && hadFailures ) {
+			if ( keysToRemove.length ) {
+				batch.find( { key: { $in: keysToRemove } } ).remove( );
+			}
+			batch.execute( function ( err ) {
+				if ( err ) {
+					console.error( 'Error executing batch when clearing expired dependencies in MongoTransport:', err );
+					self.emit( 'error', err );
+				}
+				cb( );
+				// console.log( '~~~ executed dependency batch' );
+			});
+		}
+	};
+	cursor.each( function ( err, d ) {
 		if ( err ) {
-			return console.error( 'Error checking dependencies in MongoTransport:', err );
+			return self.emit( 'error', err );
+		}
+		if ( !d ) {
+			if ( hadAny ) {
+				checker.run( );
+			} else {
+				cb( );
+			}
+			return;
 		}
 
-		var abort = false;
-		var hadAny = false;
-		var remaining = 1;
-		var done = false;
-		var batch = self.collection.initializeUnorderedBulkOp( );
-
-		var checkDone = function ( ) {
-			if ( !( --remaining ) && done && hadAny ) {
-				batch.execute( function ( err ) {
-					if ( err ) {
-						console.error( 'Error executing batch when clearing expired dependencies in MongoTransport:', err );
+		hadAny = true;
+		remaining++;
+		var innerDependencyCounter = d.dependencies.length;
+		var toPull = [];
+		// console.log( 'Checking dependencies on', d.key );
+		_.each( d.dependencies, function ( dependencies ) {
+			checker.addDependencyCheck( dependencies, function ( allowed ) {
+				if ( !allowed ) {
+					console.log( 'Failed dependencies on', d.key, '->', dependencies );
+					toPull.push( dependencies );
+					hadFailures = true;
+				} else {
+					console.log( 'Succeeded dependencies on', d.key, '->', dependencies );
+				}
+				if ( !( --innerDependencyCounter ) ) {
+					if ( toPull.length === d.dependencies.length ) {
+						// All dependencies have failed
+						console.log( 'All dependencies failed, removing', d.key );
+						keysToRemove.push( d.key );
+					} else if ( toPull.length ) {
+						console.log( d.key, '=>', { $pullAll: { dependencies: toPull } } );
+						batch.find( { key: d.key } ).updateOne( { $pullAll: { dependencies: toPull } } );
 					}
-					// console.log( '~~~ executed dependency batch' );
-				});
-			}
-		};
-
-		cursor.each( function ( err, d ) {
-			if ( abort ) return;
-			if ( err ) {
-				return console.error( 'Error checking dependencies in MongoTransport:', err );
-			}
-			if ( !d ) {
-				done = true;
-				return checkDone( );
-			}
-
-			remaining++;
-			var innerDependencyCounter = d.dependencies.length;
-			var toPull = [];
-			// console.log( 'Checking dependencies on', d.key );
-			_.each( d.dependencies, function ( dependencies ) {
-				self.checkOneDependent( dependencies, function ( err, allowed ) {
-					if ( err || abort ) {
-						abort = true;
-						return;
-					}
-					if ( !allowed ) {
-						console.log( 'Failed dependencies on', d.key, '->', dependencies );
-						toPull.push( dependencies );
-						hadAny = true;
-					}
-					if ( !( --innerDependencyCounter ) ) {
-						if ( toPull.length === d.dependencies.length ) {
-							// All dependencies have failed
-							console.log( 'All dependencies failed, removing', d.key );
-							batch.find( { key: d.key } ).remove( );
-						} else if ( toPull.length ) {
-							console.log( d.key, '=>', { $pullAll: { dependencies: toPull } } );
-							batch.find( { key: d.key } ).updateOne( { $pullAll: { dependencies: toPull } } );
-						}
-						checkDone( );
-					}
-				});
+					checkDone( );
+				}
 			});
 		});
 	});
 };
+
+
+
+
+
+
+
+
+function MongoDependencyCheck ( db, gracePeriod ) {
+	this.toCheck = {};
+	this.db = db;
+	if ( gracePeriod ) {
+		this.gracePeriod = gracePeriod;
+	}
+}
+
+util.inherits( MongoDependencyCheck, EventEmitter );
+
+MongoDependencyCheck.prototype.addDependencyCheck = function ( dependencies, cb ) {
+	if ( this.running ) return;
+	var totalDeps = _.size( dependencies );
+	if ( !totalDeps ) {
+		return cb( true );
+	}
+
+
+	var self = this;
+	var abort = false;
+	var callback = function ( allowed ) {
+		if ( abort ) return;
+		if ( !allowed ) {
+			abort = true;
+			cb( false );
+		} else if ( !( --totalDeps ) ) {
+			cb( true );
+		}
+	};
+	_.each( dependencies, function ( v, k ) {
+		if ( k === 'KV_KEEP_ALIVE' && v ) {
+			cb( true );
+			abort = true;
+			return false;
+		}
+		var spl = k.split( DOT_SEPARATOR_REPLACEMENT );
+		var collection = spl.shift( );
+		var searchKey = spl.join( '.' );
+		if ( !self.toCheck[ collection ] ) {
+			self.toCheck[ collection ] = {};
+			self.toCheck[ collection ][ searchKey ] = {};
+		} else if ( !self.toCheck[ collection ][ searchKey ] ) {
+			self.toCheck[ collection ][ searchKey ] = {};
+		}
+		if ( !self.toCheck[ collection ][ searchKey ][ v ] ) {
+			self.toCheck[ collection ][ searchKey ][ v ] = [ callback ];
+		} else {
+			self.toCheck[ collection ][ searchKey ][ v ].push( callback );
+		}
+	});
+};
+
+MongoDependencyCheck.prototype.run = function ( ) {
+	if ( this.running ) return;
+	console.log( '>>> running dependency check' );
+	console.log( JSON.stringify( this.toCheck, null, 4 ) );
+	this.running = true;
+	var self = this;
+	var collectionsRemaining = _.size( self.toCheck );
+	if ( !collectionsRemaining ) return;
+
+	var abort = false;
+	var cbsRemaining = 0;
+	_.each( self.toCheck, function ( searchKeys, collection ) {
+		if ( abort ) return;
+		var search = [];
+		var filter = { _id: 0 };
+		_.each( searchKeys, function ( values, key ) {
+			var searchObj = {};
+			searchObj[ key ] = { $in: _.keys( values ) };
+			cbsRemaining += _.size( values );
+			search.push( searchObj );
+			filter[ key ] = 1;
+		});
+		console.log( '>>> running check on', collection, 'for:', util.inspect( { $or: search }, { depth: null } ) );
+		self.db.collection( collection ).find( { $or: search }, filter, function ( err, cursor ) {
+			if ( abort ) return;
+			if ( err ) {
+				abort = true;
+				self.emit( 'error', err );
+				self.destroy( );
+				return;
+			}
+
+			cursor.each( function ( err, doc ) {
+				if ( abort ) return;
+				if ( err ) {
+					abort = true;
+					self.emit( 'error', err );
+					self.destroy( );
+					return;
+				}
+				if ( !doc ) {
+					if ( !( --collectionsRemaining ) ) {
+						self.finish( cbsRemaining );
+					}
+					return;
+				}
+
+				( function processObj ( value, prefix ) {
+					if ( typeof value !== 'object' || Array.isArray( value ) || value instanceof RegExp || value instanceof Date ) {
+						if ( self.toCheck[ collection ][ prefix ] && self.toCheck[ collection ][ prefix ][ value ] ) {
+							_.each( self.toCheck[ collection ][ prefix ][ value ], function ( fn ) {
+								fn( true );
+							});
+							cbsRemaining--;
+							delete self.toCheck[ collection ][ prefix ][ value ];
+						}
+					} else {
+						_.each( value, function ( v, k ) {
+							processObj( v, prefix ? prefix + '.' + k : k, self.toCheck[ collection ] );
+						});
+					}
+				})( doc, '' );
+			});
+		});
+	});
+};
+
+MongoDependencyCheck.prototype.finish = function ( failedDependencies ) {
+	var self = this;
+	if ( failedDependencies && self.gracePeriod ) {
+		console.log( '>>> Waiting', self.gracePeriod, 'ms then re-running under grace period' );
+		setTimeout( function ( ) {
+			self.gracePeriod = 0;
+			self.running = false;
+			self.run( );
+		}, self.gracePeriod );
+	} else {
+		_.each( self.toCheck, function ( searchKeys, collection ) {
+			_.each( searchKeys, function ( values, key ) {
+				_.each( values, function ( cbs ) {
+					_.each( cbs, function ( cb ) {
+						cb( false );
+					});
+				});
+			});
+		});
+		self.destroy( );
+	}
+};
+
+MongoDependencyCheck.prototype.destroy = function ( ) {
+	console.log( '>>> destroying MongoDependencyCheck' );
+	this.emit( 'destroy' );
+	this.toCheck = null;
+	this.db = null;
+	this.removeAllListeners( );
+};
+
+
+
+
+
+
+
+
+
+
 
 
 
