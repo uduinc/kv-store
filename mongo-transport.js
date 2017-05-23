@@ -15,7 +15,7 @@ var DOT_SEPARATOR_REPLACEMENT = '|_DOT_SEPARATOR_|';
 
 function MongoTransport ( opts ) {
 	opts = opts || {};
-	opts.dependencyInterval = opts.dependencyInterval || 3600000;
+	opts.dependencyInterval = opts.dependencyInterval || 30000 || 3600000;
 	Transport.call( this, opts );
 
 	var self = this;
@@ -23,6 +23,8 @@ function MongoTransport ( opts ) {
 	self.maxObjectSize = opts.maxObjectSize || 14000000;
 	self.pieceLength = Math.min( self.maxObjectSize, opts.pieceSize || 10000000 ) / 2;
 	self.dependencyGracePeriod = opts.dependencyGracePeriod || 5000;
+	self.dependencyCheckPrecondition = opts.dependencyCheckPrecondition || function ( cb ) { cb( true ); };
+	self.dependencyCheckCallback = opts.dependencyCheckCallback;
 
 	if ( opts.collection ) {
 		self.collectionName = opts.collection;
@@ -413,74 +415,78 @@ MongoTransport.prototype.deleteBy = function ( search, cb ) {
 };
 
 MongoTransport.prototype.checkDependencies = function ( cb ) {
-	cb = cb || function ( ) { };
 	var self = this;
-	// console.log( '~~~ checking dependencies' );
-	var cursor = self.collection.find( { dependencies: { $exists: true, $ne: [] } }, { key: 1, dependencies: 1, _id: 0 } );
-	var abort = false;
-	var hadAny = false;
-	var hadFailures = false;
-	var remaining = 0;
-	var batch = self.collection.initializeUnorderedBulkOp( );
-	var keysToRemove = [];
+	self.dependencyCheckPrecondition( function ( runCheck ) {
+		if ( !runCheck ) return;
 
-	var checker = new MongoDependencyCheck( self.db, self.dependencyGracePeriod );
-	checker.on( 'error', self.emit.bind( self, 'error' ) );
-	checker.on( 'destroy', cb );
+		// console.log( '~~~ checking dependencies' );
+		var cursor = self.collection.find( { dependencies: { $exists: true, $ne: [] } }, { key: 1, dependencies: 1, _id: 0 } );
+		var abort = false;
+		var hadAny = false;
+		var hadFailures = false;
+		var remaining = 0;
+		var batch = self.collection.initializeUnorderedBulkOp( );
+		var keysToRemove = [];
 
-	var checkDone = function ( ) {
-		if ( !( --remaining ) && hadFailures ) {
-			if ( keysToRemove.length ) {
-				batch.find( { key: { $in: keysToRemove } } ).remove( );
+		var checker = new MongoDependencyCheck( self.db, self.dependencyGracePeriod );
+		checker.on( 'error', self.emit.bind( self, 'error' ) );
+		checker.on( 'destroy', function ( ) {
+			if ( self.dependencyCheckCallback ) {
+				self.dependencyCheckCallback( );
 			}
-			batch.execute( function ( err ) {
-				if ( err ) {
-					console.error( 'Error executing batch when clearing expired dependencies in MongoTransport:', err );
-					self.emit( 'error', err );
-				}
-				cb( );
-				// console.log( '~~~ executed dependency batch' );
-			});
-		}
-	};
-	cursor.each( function ( err, d ) {
-		if ( err ) {
-			return self.emit( 'error', err );
-		}
-		if ( !d ) {
-			if ( hadAny ) {
-				checker.run( );
-			} else {
-				cb( );
-			}
-			return;
-		}
+		});
 
-		hadAny = true;
-		remaining++;
-		var innerDependencyCounter = d.dependencies.length;
-		var toPull = [];
-		// console.log( 'Checking dependencies on', d.key );
-		_.each( d.dependencies, function ( dependencies ) {
-			checker.addDependencyCheck( dependencies, function ( allowed ) {
-				if ( !allowed ) {
-					console.log( 'Failed dependencies on', d.key, '->', dependencies );
-					toPull.push( dependencies );
-					hadFailures = true;
-				} else {
-					console.log( 'Succeeded dependencies on', d.key, '->', dependencies );
+		var checkDone = function ( ) {
+			if ( !( --remaining ) && hadFailures ) {
+				if ( keysToRemove.length ) {
+					batch.find( { key: { $in: keysToRemove } } ).remove( );
 				}
-				if ( !( --innerDependencyCounter ) ) {
-					if ( toPull.length === d.dependencies.length ) {
-						// All dependencies have failed
-						console.log( 'All dependencies failed, removing', d.key );
-						keysToRemove.push( d.key );
-					} else if ( toPull.length ) {
-						console.log( d.key, '=>', { $pullAll: { dependencies: toPull } } );
-						batch.find( { key: d.key } ).updateOne( { $pullAll: { dependencies: toPull } } );
+				batch.execute( function ( err ) {
+					if ( err ) {
+						console.error( 'Error executing batch when clearing expired dependencies in MongoTransport:', err );
+						self.emit( 'error', err );
 					}
-					checkDone( );
+					// console.log( '~~~ executed dependency batch' );
+				});
+			}
+		};
+		cursor.each( function ( err, d ) {
+			if ( err ) {
+				return self.emit( 'error', err );
+			}
+			if ( !d ) {
+				if ( hadAny ) {
+					checker.run( );
 				}
+				return;
+			}
+
+			hadAny = true;
+			remaining++;
+			var innerDependencyCounter = d.dependencies.length;
+			var toPull = [];
+			// console.log( 'Checking dependencies on', d.key );
+			_.each( d.dependencies, function ( dependencies ) {
+				checker.addDependencyCheck( dependencies, function ( allowed ) {
+					if ( !allowed ) {
+						console.log( 'Failed dependencies on', d.key, '->', dependencies );
+						toPull.push( dependencies );
+						hadFailures = true;
+					} else {
+						console.log( 'Succeeded dependencies on', d.key, '->', dependencies );
+					}
+					if ( !( --innerDependencyCounter ) ) {
+						if ( toPull.length === d.dependencies.length ) {
+							// All dependencies have failed
+							console.log( 'All dependencies failed, removing', d.key );
+							keysToRemove.push( d.key );
+						} else if ( toPull.length ) {
+							console.log( d.key, '=>', { $pullAll: { dependencies: toPull } } );
+							batch.find( { key: d.key } ).updateOne( { $pullAll: { dependencies: toPull } } );
+						}
+						checkDone( );
+					}
+				});
 			});
 		});
 	});
