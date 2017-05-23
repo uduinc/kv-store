@@ -99,7 +99,7 @@ MongoTransport.prototype.checkOneDependent = function ( dependencies, cb ) {
 		var search = {};
 		search[ spl.join( '.' ) ] = dv;
 
-		console.log( 'Checking dependency:', search );
+		// console.log( 'Checking dependency:', search );
 
 		collection.count( search, function ( err, count ) {
 			if ( err ) {
@@ -469,19 +469,19 @@ MongoTransport.prototype.checkDependencies = function ( cb ) {
 			_.each( d.dependencies, function ( dependencies ) {
 				checker.addDependencyCheck( dependencies, function ( allowed ) {
 					if ( !allowed ) {
-						console.log( 'Failed dependencies on', d.key, '->', dependencies );
+						// console.log( 'Failed dependencies on', d.key, '->', dependencies );
 						toPull.push( dependencies );
 						hadFailures = true;
 					} else {
-						console.log( 'Succeeded dependencies on', d.key, '->', dependencies );
+						// console.log( 'Succeeded dependencies on', d.key, '->', dependencies );
 					}
 					if ( !( --innerDependencyCounter ) ) {
 						if ( toPull.length === d.dependencies.length ) {
 							// All dependencies have failed
-							console.log( 'All dependencies failed, removing', d.key );
+							// console.log( 'All dependencies failed, removing', d.key );
 							keysToRemove.push( d.key );
 						} else if ( toPull.length ) {
-							console.log( d.key, '=>', { $pullAll: { dependencies: toPull } } );
+							// console.log( d.key, '=>', { $pullAll: { dependencies: toPull } } );
 							batch.find( { key: d.key } ).updateOne( { $pullAll: { dependencies: toPull } } );
 						}
 						checkDone( );
@@ -553,8 +553,8 @@ MongoDependencyCheck.prototype.addDependencyCheck = function ( dependencies, cb 
 
 MongoDependencyCheck.prototype.run = function ( ) {
 	if ( this.running ) return;
-	console.log( '>>> running dependency check' );
-	console.log( JSON.stringify( this.toCheck, null, 4 ) );
+	// console.log( '>>> running dependency check' );
+	// console.log( JSON.stringify( this.toCheck, null, 4 ) );
 	this.running = true;
 	var self = this;
 	var collectionsRemaining = _.size( self.toCheck );
@@ -573,7 +573,7 @@ MongoDependencyCheck.prototype.run = function ( ) {
 			search.push( searchObj );
 			filter[ key ] = 1;
 		});
-		console.log( '>>> running check on', collection, 'for:', util.inspect( { $or: search }, { depth: null } ) );
+		// console.log( '>>> running check on', collection, 'for:', util.inspect( { $or: search }, { depth: null } ) );
 		self.db.collection( collection ).find( { $or: search }, filter, function ( err, cursor ) {
 			if ( abort ) return;
 			if ( err ) {
@@ -621,7 +621,7 @@ MongoDependencyCheck.prototype.run = function ( ) {
 MongoDependencyCheck.prototype.finish = function ( failedDependencies ) {
 	var self = this;
 	if ( failedDependencies && self.gracePeriod ) {
-		console.log( '>>> Waiting', self.gracePeriod, 'ms then re-running under grace period' );
+		// console.log( '>>> Waiting', self.gracePeriod, 'ms then re-running under grace period' );
 		setTimeout( function ( ) {
 			self.gracePeriod = 0;
 			self.running = false;
@@ -642,7 +642,7 @@ MongoDependencyCheck.prototype.finish = function ( failedDependencies ) {
 };
 
 MongoDependencyCheck.prototype.destroy = function ( ) {
-	console.log( '>>> destroying MongoDependencyCheck' );
+	// console.log( '>>> destroying MongoDependencyCheck' );
 	this.emit( 'destroy' );
 	this.toCheck = null;
 	this.db = null;
