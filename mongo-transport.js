@@ -35,8 +35,26 @@ function MongoTransport ( opts ) {
 	if ( opts.db ) {
 		self.db = opts.db;
 		self.collection = self.db.collection( self.collectionName );
-		self.ready = true;
-		self.dependencyInterval = setInterval( self.checkDependencies.bind( self ), opts.dependencyInterval );
+		self.collection.ensureIndex( 'key', { unique: true }, function ( err ) {
+			if ( err ) {
+				throw err;
+			}
+
+			self.collection.ensureIndex( 'expiration', { expireAfterSeconds: 0, sparse: true }, function ( err ) {
+				if ( err ) {
+					throw err;
+				}
+
+				self.collection.ensureIndex( 'dependencies', { sparse: true }, function ( err ) {
+					if ( err ) {
+						throw err;
+					}
+
+					self.ready = true;
+					self.dependencyInterval = setInterval( self.checkDependencies.bind( self ), opts.dependencyInterval );
+				});
+			});
+		});
 	} else if ( opts.connection_string ) {
 		mongo.connect( opts.connection_string, function ( err, db ) {
 			if ( err ) {
