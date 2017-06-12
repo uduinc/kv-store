@@ -230,23 +230,20 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 			var batch = self.collection.initializeOrderedBulkOp( );
 			for ( var idx = 0; idx < str.length; idx += self.pieceLength ) {
 				var piece = str.slice( idx, idx+self.pieceLength );
+				var key = utils.hash( piece );
 				var pieceObj = _.assign( {}, updateObj, {
-					key: utils.hash( piece ),
-					value: piece,
-					meta: obj.meta
+					$set: {
+						key: key,
+						value: piece,
+						meta: obj.meta
+					}
 				});
-				if ( obj.dependencies ) {
-					pieceObj.dependencies = obj.dependencies;
-				}
-				if ( obj.expiration ) {
-					pieceObj.expiration = obj.expiration;
-				}
-				keys.push( pieceObj.key );
-				batch.find( { key: pieceObj.key } ).upsert( ).updateOne( pieceObj );
+				keys.push( key );
+				batch.find( { key: key } ).upsert( ).updateOne( pieceObj );
 			}
-			obj.value = keys;
-			obj.piece_split = true;
-			batch.find( { key: k } ).upsert( ).updateOne( obj );
+			updateObj[ '$set' ].value = keys;
+			updateObj[ '$set' ].piece_split = true;
+			batch.find( { key: k } ).upsert( ).updateOne( updateObj );
 			batch.execute( cb );
 		} else {
 			self.collection.update( { key: k }, updateObj, { upsert: true }, cb );
@@ -487,7 +484,6 @@ MongoTransport.prototype.checkDependencies = function ( cb ) {
 			remaining++;
 			var innerDependencyCounter = d.dependencies.length;
 			var toPull = [];
-			// console.log( 'Checking dependencies on', d.key );
 			_.each( d.dependencies, function ( dependencies ) {
 				checker.addDependencyCheck( dependencies, function ( allowed ) {
 					if ( !allowed ) {
@@ -555,6 +551,10 @@ MongoDependencyCheck.prototype.addDependencyCheck = function ( dependencies, cb 
 			cb( true );
 			abort = true;
 			return false;
+		}
+		if ( !k.split ) {
+			console.error( '>>>>>', k, v );
+			console.error( '-----', dependencies );
 		}
 		var spl = k.split( DOT_SEPARATOR_REPLACEMENT );
 		var collection = spl.shift( );
