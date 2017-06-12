@@ -295,7 +295,7 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 };
 
 MongoTransport.prototype.getPieces = function ( pieces, cb, key, meta ) {
-	self.collection.find( { key: { $in: pieces } }, function ( err, cursor ) {
+	this.collection.find( { key: { $in: pieces } }, function ( err, cursor ) {
 		if ( err ) {
 			// console.log( 'DB > ERR' );
 			return cb( err );
