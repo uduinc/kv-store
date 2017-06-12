@@ -145,7 +145,9 @@ var flatten = function ( obj, prefix ) {
 	}
 	prefix = prefix ? prefix + '.' : '';
 	var newObj = {};
-	_.each( obj, function ( v, k ) {
+	// looping over obj keys instead of obj itself in case obj contains "length", which lodash treats as array-like
+	_.each( _.keys( obj ), function ( k ) {
+		var v = obj[ k ];
 		k = k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT );
 		if ( v && typeof v === 'object' && !( Array.isArray( v ) || v instanceof RegExp || v instanceof Date ) ) {
 			_.merge( newObj, flatten( v, prefix + k ) )
@@ -161,8 +163,10 @@ var escapeDots = function ( obj ) {
 		return obj;
 	}
 	var newObj = {};
-	_.each( obj, function ( v, k ) {
-		newObj[ k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT ) ] = escapeDots( obj[ k ] );
+	_.each( _.keys( obj ), function ( k ) {
+		var v = obj[ k ];
+		var replacedKey = ( typeof k === 'string' ) ? k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT ) : k;
+		newObj[ replacedKey ] = escapeDots( obj[ k ] );
 	});
 	return newObj;
 };
