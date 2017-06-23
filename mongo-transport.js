@@ -12,6 +12,7 @@ var Transport = require( './transport' );
 
 
 var DOT_SEPARATOR_REPLACEMENT = '|_DOT_SEPARATOR_|';
+var DOLLAR_SEPARATOR_REPLACEMENT = '|_DOLLAR_SEPARATOR_|';
 
 function MongoTransport ( opts ) {
 	opts = opts || {};
@@ -21,7 +22,10 @@ function MongoTransport ( opts ) {
 	var self = this;
 
 	self.maxObjectSize = opts.maxObjectSize || 14000000;
+
+	// 1 string char = 2 bytes
 	self.pieceLength = Math.min( self.maxObjectSize, opts.pieceSize || 10000000 ) / 2;
+	
 	self.dependencyGracePeriod = opts.dependencyGracePeriod || 5000;
 	self.dependencyCheckPrecondition = opts.dependencyCheckPrecondition || function ( cb ) { cb( true ); };
 	self.dependencyCheckCallback = opts.dependencyCheckCallback;
@@ -158,28 +162,28 @@ var flatten = function ( obj, prefix ) {
 	return newObj;
 };
 
-var escapeDots = function ( obj ) {
+var escapeKeys = function ( obj ) {
 	if ( !obj || typeof obj !== 'object' || Array.isArray( obj ) || obj instanceof RegExp || obj instanceof Date ) {
 		return obj;
 	}
 	var newObj = {};
 	_.each( _.keys( obj ), function ( k ) {
 		var v = obj[ k ];
-		var replacedKey = ( typeof k === 'string' ) ? k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT ) : k;
-		newObj[ replacedKey ] = escapeDots( obj[ k ] );
+		var replacedKey = ( typeof k === 'string' ) ? k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT ).replace( /\$/g, DOLLAR_SEPARATOR_REPLACEMENT ) : k;
+		newObj[ replacedKey ] = escapeKeys( obj[ k ] );
 	});
 	return newObj;
 };
 
-var unescapeDots = function ( obj ) {
+var unescapeKeys = function ( obj ) {
 	if ( !obj || typeof obj !== 'object' || Array.isArray( obj ) || obj instanceof RegExp || obj instanceof Date ) {
 		return obj;
 	}
 	return _.transform( obj, function ( result, v, k ) {
 		if ( v && typeof v === 'object' && !( Array.isArray( v ) || v instanceof RegExp || v instanceof Date ) ) {
-			result[ k.split( DOT_SEPARATOR_REPLACEMENT ).join( '.' ) ] = unescapeDots( v );
+			result[ k.split( DOT_SEPARATOR_REPLACEMENT ).join( '.' ).split( DOLLAR_SEPARATOR_REPLACEMENT ).join( '$' ) ] = unescapeKeys( v );
 		} else {
-			result[ k.split( DOT_SEPARATOR_REPLACEMENT ).join( '.' ) ] = v;
+			result[ k.split( DOT_SEPARATOR_REPLACEMENT ).join( '.' ).split( DOLLAR_SEPARATOR_REPLACEMENT ).join( '$' ) ] = v;
 		}
 	});
 };
@@ -187,7 +191,7 @@ var unescapeDots = function ( obj ) {
 
 MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 	var self = this;
-	var obj = { key: k, value: escapeDots( v ) };
+	var obj = { key: k, value: escapeKeys( v ) };
 	if ( opts.expiration ) {
 		obj.expiration = new Date( opts.expiration );
 	} else if ( opts.ttl ) {
@@ -312,7 +316,7 @@ MongoTransport.prototype.getPieces = function ( pieces, cb, key, meta ) {
 			if ( !piece ) {
 				if ( piecesFound === pieces.length ) {
 					// console.log( 'DB > FOUND' );
-					return cb( null, unescapeDots( JSON.parse( pieces.join( '' ) ) ), key, meta );
+					return cb( null, unescapeKeys( JSON.parse( pieces.join( '' ) ) ), key, meta );
 				} else {
 					var err = new Error( 'Incomplete data found.' );
 					err.key = k;
@@ -345,7 +349,7 @@ MongoTransport.prototype.get = function ( k, cb ) {
 			} else {
 				// console.log( 'DB >', data.value );
 				// console.log( 'DB > FOUND' );
-				cb( err, unescapeDots( data.value ), k, data.meta );
+				cb( err, unescapeKeys( data.value ), k, data.meta );
 			}
 		}
 	});
