@@ -193,6 +193,19 @@ KVStore.prototype.get = function ( k, opts, cb ) {
 		k = 'k_' + utils.hash( k );
 	}
 
+	if ( _.isNumber( opts.retry ) && opts.retry > 0 ) {
+		var actualCb = cb;
+		cb = function ( err, value, key, meta ) {
+			if ( err || !value ) {
+				setTimeout( function ( self, k, opts, cb ) {
+					self.get( k, _.merge( opts, { retry: opts.retry - 1 } ), cb );
+				}, opts.retryDelay || 1000, self, k, opts, actualCb );
+			} else {
+				actualCb( err, value, key, meta );
+			}
+		};
+	}
+
 	var pullers = [];
 	( function getNext( i ) {
 		if ( i >= self.priorityList.length ) {
