@@ -442,7 +442,7 @@ MongoTransport.prototype.checkDependencies = function ( cb ) {
 	self.dependencyCheckPrecondition( function ( runCheck ) {
 		if ( !runCheck ) return;
 
-		// console.log( '~~~ checking dependencies' );
+		console.log( '~~~ checking dependencies' );
 		var cursor = self.collection.find( { dependencies: { $exists: true, $ne: [] } }, { key: 1, dependencies: 1, _id: 0 } );
 		var abort = false;
 		var hadAny = false;
@@ -469,20 +469,26 @@ MongoTransport.prototype.checkDependencies = function ( cb ) {
 						console.error( 'Error executing batch when clearing expired dependencies in MongoTransport:', err );
 						self.emit( 'error', err );
 					}
-					// console.log( '~~~ executed dependency batch' );
+					console.log( '~~~ executed dependency batch' );
 				});
 			}
 		};
+		var maxTime = 0;
+		var totalTime = 0;
+		var count = 0;
 		cursor.each( function ( err, d ) {
 			if ( err ) {
 				return self.emit( 'error', err );
 			}
 			if ( !d ) {
+				console.log( '>>> Done analyzing dependencies ( count:', count, '-- total:', totalTime, 'ms; max:', maxTime, 'ms )' );
 				if ( hadAny ) {
 					checker.run( );
 				}
 				return;
 			}
+
+			var startTime = Date.now( );
 
 			hadAny = true;
 			remaining++;
@@ -506,10 +512,13 @@ MongoTransport.prototype.checkDependencies = function ( cb ) {
 							// console.log( d.key, '=>', { $pullAll: { dependencies: toPull } } );
 							batch.find( { key: d.key } ).updateOne( { $pullAll: { dependencies: toPull } } );
 						}
-						checkDone( );
 					}
 				});
 			});
+			var timePassed = Date.now( ) - startTime;
+			maxTime = Math.max( maxTime, timePassed );
+			count++;
+			checkDone( );
 		});
 	});
 };
@@ -579,7 +588,7 @@ MongoDependencyCheck.prototype.addDependencyCheck = function ( dependencies, cb 
 
 MongoDependencyCheck.prototype.run = function ( ) {
 	if ( this.running ) return;
-	// console.log( '>>> running dependency check' );
+	console.log( '>>> running dependency check' );
 	// console.log( JSON.stringify( this.toCheck, null, 4 ) );
 	this.running = true;
 	var self = this;
@@ -599,7 +608,7 @@ MongoDependencyCheck.prototype.run = function ( ) {
 			search.push( searchObj );
 			filter[ key ] = 1;
 		});
-		// console.log( '>>> running check on', collection, 'for:', util.inspect( { $or: search }, { depth: null } ) );
+		console.log( '>>> running check on', collection, 'for', search.length, 'items' );
 		self.db.collection( collection ).find( { $or: search }, filter, function ( err, cursor ) {
 			if ( abort ) return;
 			if ( err ) {
@@ -609,7 +618,12 @@ MongoDependencyCheck.prototype.run = function ( ) {
 				return;
 			}
 
+			var maxTime = 0;
+			var totalTime = 0;
+			var count = 0;
+
 			cursor.each( function ( err, doc ) {
+				var startTime = Date.now( );
 				if ( abort ) return;
 				if ( err ) {
 					abort = true;
@@ -618,6 +632,7 @@ MongoDependencyCheck.prototype.run = function ( ) {
 					return;
 				}
 				if ( !doc ) {
+					console.log( '>>> Done running check on', collection, '( count:', count, '-- total:', totalTime, 'ms; max:', maxTime, 'ms )' );
 					if ( !( --collectionsRemaining ) ) {
 						self.finish( cbsRemaining );
 					}
@@ -639,6 +654,11 @@ MongoDependencyCheck.prototype.run = function ( ) {
 						});
 					}
 				})( doc, '' );
+
+				var timePassed = Date.now( ) - startTime;
+				totalTime += timePassed;
+				maxTime = Math.max( maxTime, timePassed );
+				count++;
 			});
 		});
 	});
@@ -647,7 +667,7 @@ MongoDependencyCheck.prototype.run = function ( ) {
 MongoDependencyCheck.prototype.finish = function ( failedDependencies ) {
 	var self = this;
 	if ( failedDependencies && self.gracePeriod ) {
-		// console.log( '>>> Waiting', self.gracePeriod, 'ms then re-running under grace period' );
+		console.log( '>>> Waiting', self.gracePeriod, 'ms then re-running under grace period' );
 		setTimeout( function ( ) {
 			self.gracePeriod = 0;
 			self.running = false;
@@ -668,7 +688,7 @@ MongoDependencyCheck.prototype.finish = function ( failedDependencies ) {
 };
 
 MongoDependencyCheck.prototype.destroy = function ( ) {
-	// console.log( '>>> destroying MongoDependencyCheck' );
+	console.log( '>>> destroying MongoDependencyCheck' );
 	this.emit( 'destroy' );
 	this.toCheck = null;
 	this.db = null;
