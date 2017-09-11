@@ -517,6 +517,7 @@ MongoTransport.prototype.checkDependencies = function ( cb ) {
 			});
 			var timePassed = Date.now( ) - startTime;
 			maxTime = Math.max( maxTime, timePassed );
+			totalTime += timePassed;
 			count++;
 			checkDone( );
 		});
