@@ -437,7 +437,7 @@ MongoTransport.prototype.deleteBy = function ( search, cb ) {
 	this.collection.remove( flatten( search ), cb );
 };
 
-MongoTransport.prototype.checkDependencies = function ( cb ) {
+MongoTransport.prototype.checkDependencies = function ( ) {
 	var self = this;
 	self.dependencyCheckPrecondition( function ( runCheck ) {
 		if ( !runCheck ) return;
@@ -484,6 +484,8 @@ MongoTransport.prototype.checkDependencies = function ( cb ) {
 				console.log( '>>> Done analyzing dependencies ( count:', count, '-- total:', totalTime, 'ms; max:', maxTime, 'ms )' );
 				if ( hadAny ) {
 					checker.run( );
+				} else if ( self.dependencyCheckCallback ) {
+					self.dependencyCheckCallback( );
 				}
 				return;
 			}
