@@ -393,17 +393,16 @@ MongoTransport.prototype.getAll = function ( keys, cb ) {
 };
 
 MongoTransport.prototype.findByMeta = function ( search, cb ) {
-	this.collection.find( flatten( search, 'meta' ), { key: 1, value: 1 } ).toArray( function ( err, data ) {
-		if ( err ) {
-			cb( err );
-		} else if ( data && data.length ) {
-			var dataObj = {};
-			_.each( data, function ( d ) {
-				dataObj[ d.key ] = d.value;
-			});
-			cb( null, dataObj );
+	var arr = [];
+	var i = 0;
+	var done = false;
+	this.collection.find( flatten( search, 'meta' ), { value: 1, _id: 0 } ).each( function ( err, d ) {
+		if ( done ) return;
+		if ( err || !d ) {
+			done = true;
+			cb( err, arr );
 		} else {
-			cb( null, {} );
+			arr[ i++ ] = d.value;
 		}
 	});
 };

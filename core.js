@@ -290,29 +290,29 @@ KVStore.prototype.findByMeta = function ( meta, opts, cb ) {
 		opts = {};
 	}
 
-	var values = {};
 	( function findNext( i ) {
-		if ( i >= self.priorityList.length ) {
-			return cb( null, values );
+		if ( i < 0 ) {
+			return cb( null, [] );
 		}
 
 		var next = self.priorityList[ i ];
 		if ( opts.transports && !~opts.transports.indexOf( next.name ) ) {
-			return findNext( i+1 );
+			return findNext( i-1 );
 		}
 		if ( opts.transportExclusions && ~opts.transportExclusions.indexOf( next.name ) ) {
-			return findNext( i+1 );
+			return findNext( i-1 );
 		}
 		next.transport.__findByMeta( meta, function ( err, v ) {
 			if ( err ) {
 				self.emit( 'error', err );
 			}
-			if ( v && !_.isEmpty( v ) ) {
-				values = _.assign( {}, v, values );
+			if ( v && v.length ) {
+				cb( null, v );
+			} else {
+				findNext( i-1 );
 			}
-			findNext( i+1 );
 		});
-	})( 0 );
+	})( self.priorityList.length-1 );
 };
 
 KVStore.prototype.ready = function ( ) {
