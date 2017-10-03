@@ -13,6 +13,7 @@ var Transport = require( './transport' );
 
 var DOT_SEPARATOR_REPLACEMENT = '|_DOT_SEPARATOR_|';
 var DOLLAR_SEPARATOR_REPLACEMENT = '|_DOLLAR_SEPARATOR_|';
+var KEEP_ALIVE_STRING = 'KV_KEEP_ALIVE';
 
 function MongoTransport ( opts ) {
 	opts = opts || {};
@@ -109,7 +110,7 @@ MongoTransport.prototype.checkOneDependent = function ( dependencies, cb ) {
 	_.each( dependencies, function ( dv, dk ) {
 		if ( abort || !allowed ) return false;
 
-		if ( dk === 'KV_KEEP_ALIVE' && dv ) {
+		if ( dk === KEEP_ALIVE_STRING && dv ) {
 			cb( null, true );
 			abort = true;
 			return false;
@@ -293,7 +294,7 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 
 		dependencyChecker.run( );
 	} else {
-		obj.dependencies = { 'KV_KEEP_ALIVE': true };
+		obj.dependencies = { KEEP_ALIVE_STRING: true };
 		setInternal( );
 	}
 };
@@ -552,7 +553,7 @@ MongoDependencyCheck.prototype.addDependencyCheck = function ( dependencies, cb 
 		}
 	};
 	_.each( dependencies, function ( v, k ) {
-		if ( k === 'KV_KEEP_ALIVE' && v ) {
+		if ( k === KEEP_ALIVE_STRING && v ) {
 			cb( true );
 			abort = true;
 			return false;
