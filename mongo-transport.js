@@ -4,6 +4,7 @@ var EventEmitter = require( 'events' ).EventEmitter;
 var _ = require( 'lodash' );
 var mongo = require( 'mongodb' ).MongoClient;
 var bson = new ( require( 'bson' ) ).BSONPure.BSON( );
+var CryptoJS = require( 'crypto-js' );
 
 var utils = require( './utils' );
 var errs = require( './errors' );
@@ -262,7 +263,7 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 			return k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT );
 		});
 
-		var dependencyChecker = new MongoDependencyCheck( self.db, self.dependencyGracePeriod );
+		var dependencyChecker = new MongoDependencyCheck( self.db, { gracePeriod: self.dependencyGracePeriod } );
 		dependencyChecker.on( 'error', self.emit.bind( self, 'error' ) );
 
 		var gotCB = false;
@@ -451,7 +452,10 @@ MongoTransport.prototype.checkDependencies = function ( ) {
 		var batch = self.collection.initializeUnorderedBulkOp( );
 		var keysToRemove = [];
 
-		var checker = new MongoDependencyCheck( self.db, self.dependencyGracePeriod );
+		var checker = new MongoDependencyCheck( self.db, {
+			gracePeriod: self.dependencyGracePeriod,
+			no_cache_saving: true
+		});
 		checker.on( 'error', self.emit.bind( self, 'error' ) );
 		checker.on( 'destroy', function ( ) {
 			if ( self.dependencyCheckCallback ) {
@@ -517,18 +521,32 @@ MongoTransport.prototype.checkDependencies = function ( ) {
 };
 
 
+var dependencyCache = {};
+function hashDependency ( collection, key, value ) {
+	return CryptoJS.MD5( JSON.stringify( arguments ) ).toString( );
+}
+function removeDependencyCache ( hash ) {
+	if ( dependencyCache[ hash ] ) {
+		clearTimeout( dependencyCache[ hash ] );
+	}
+	delete dependencyCache[ hash ];
+}
+function saveDependencyCache ( collection, key, value ) {
+	var hash = hashDependency( collection, key, value );
+	removeDependencyCache( hash );
+	dependencyCache[ hash ] = setTimeout( removeDependencyCache.bind( null, hash ), 60000 );
+}
+function checkDependencyCache ( collection, key, value ) {
+	return dependencyCache.hasOwnProperty( hashDependency( collection, key, value ) );
+}
 
 
-
-
-
-
-function MongoDependencyCheck ( db, gracePeriod ) {
+function MongoDependencyCheck ( db, options ) {
 	this.toCheck = {};
 	this.db = db;
-	if ( gracePeriod ) {
-		this.gracePeriod = gracePeriod;
-	}
+	options = options || {};
+	this.gracePeriod = options.gracePeriod || 0;
+	this.save_cache = !options.no_cache_saving;
 }
 
 util.inherits( MongoDependencyCheck, EventEmitter );
@@ -565,12 +583,17 @@ MongoDependencyCheck.prototype.addDependencyCheck = function ( dependencies, cb 
 		var spl = k.split( DOT_SEPARATOR_REPLACEMENT );
 		var collection = spl.shift( );
 		var searchKey = spl.join( '.' );
+		if ( checkDependencyCache( collection, searchKey, v ) ) {
+			return callback( true );
+		}
+
 		if ( !self.toCheck[ collection ] ) {
 			self.toCheck[ collection ] = {};
 			self.toCheck[ collection ][ searchKey ] = {};
 		} else if ( !self.toCheck[ collection ][ searchKey ] ) {
 			self.toCheck[ collection ][ searchKey ] = {};
 		}
+
 		if ( !self.toCheck[ collection ][ searchKey ][ v ] ) {
 			self.toCheck[ collection ][ searchKey ][ v ] = [ callback ];
 		} else {
@@ -586,7 +609,7 @@ MongoDependencyCheck.prototype.run = function ( ) {
 	this.running = true;
 	var self = this;
 	var collectionsRemaining = _.size( self.toCheck );
-	if ( !collectionsRemaining ) return;
+	if ( !collectionsRemaining ) return self.finish( );
 
 	var abort = false;
 	var cbsRemaining = 0;
@@ -632,6 +655,9 @@ MongoDependencyCheck.prototype.run = function ( ) {
 							_.each( self.toCheck[ collection ][ prefix ][ value ], function ( fn ) {
 								fn( true );
 							});
+							if ( self.save_cache ) {
+								saveDependencyCache( collection, prefix, value );
+							}
 							cbsRemaining--;
 							delete self.toCheck[ collection ][ prefix ][ value ];
 						}

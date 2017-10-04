@@ -114,7 +114,7 @@ Transport.prototype.__findByMeta = function ( meta, cb ) {
 			cb( err, values );
 		});
 	} else {
-		cb( null, {} );
+		cb( null, [] );
 	}
 };
 
