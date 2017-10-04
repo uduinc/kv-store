@@ -15,6 +15,7 @@ var Transport = require( './transport' );
 var DOT_SEPARATOR_REPLACEMENT = '|_DOT_SEPARATOR_|';
 var DOLLAR_SEPARATOR_REPLACEMENT = '|_DOLLAR_SEPARATOR_|';
 var KEEP_ALIVE_STRING = 'KV_KEEP_ALIVE';
+var MAX_DISTINCT_LIST_SIZE = 12000000;
 
 function MongoTransport ( opts ) {
 	opts = opts || {};
@@ -608,33 +609,32 @@ MongoDependencyCheck.prototype.run = function ( ) {
 	// console.log( JSON.stringify( this.toCheck, null, 4 ) );
 	this.running = true;
 	var self = this;
-	var collectionsRemaining = _.size( self.toCheck );
-	if ( !collectionsRemaining ) return self.finish( );
+	if ( !_.size( self.toCheck ) ) {
+		return self.finish( );
+	}
+	var searchesRemaining = 0;
+	// var searchesRemaining = _.size( self.toCheck );
+	// if ( !searchesRemaining ) return self.finish( );
 
 	var abort = false;
-	var cbsRemaining = 0;
+	var cbsRemaining = 1;
 	_.each( self.toCheck, function ( searchKeys, collection ) {
 		if ( abort ) return;
-		var search = [];
-		var filter = { _id: 0 };
-		_.each( searchKeys, function ( values, key ) {
-			var searchObj = {};
-			searchObj[ key ] = { $in: _.keys( values ) };
-			cbsRemaining += _.size( values );
-			search.push( searchObj );
-			filter[ key ] = 1;
+		var searches = _.mapValues( searchKeys, function ( v ) {
+			return Object.keys( v );
 		});
-		// console.log( '>>> running check on', collection, 'for:', util.inspect( { $or: search }, { depth: null } ) );
-		self.db.collection( collection ).find( { $or: search }, filter, function ( err, cursor ) {
-			if ( abort ) return;
-			if ( err ) {
-				abort = true;
-				self.emit( 'error', err );
-				self.destroy( );
+		_.each( searches, function runDistinct ( list, key ) {
+			if ( bson.calculateObjectSize( list ) > MAX_DISTINCT_LIST_SIZE ) {
+				runDistinct( list.splice( list.length / 2 ), key );
+				runDistinct( list, key );
 				return;
 			}
 
-			cursor.each( function ( err, doc ) {
+			searchesRemaining++;
+			cbsRemaining += list.length;
+			var search = {};
+			search[ key ] = { $in: list };
+			self.db.collection( collection ).distinct( key, search, function ( err, distinct ) {
 				if ( abort ) return;
 				if ( err ) {
 					abort = true;
@@ -642,34 +642,26 @@ MongoDependencyCheck.prototype.run = function ( ) {
 					self.destroy( );
 					return;
 				}
-				if ( !doc ) {
-					if ( !( --collectionsRemaining ) ) {
-						self.finish( cbsRemaining );
-					}
-					return;
-				}
 
-				( function processObj ( value, prefix ) {
-					if ( typeof value !== 'object' || Array.isArray( value ) || value instanceof RegExp || value instanceof Date ) {
-						if ( self.toCheck[ collection ][ prefix ] && self.toCheck[ collection ][ prefix ][ value ] ) {
-							_.each( self.toCheck[ collection ][ prefix ][ value ], function ( fn ) {
-								fn( true );
-							});
-							if ( self.save_cache ) {
-								saveDependencyCache( collection, prefix, value );
-							}
-							cbsRemaining--;
-							delete self.toCheck[ collection ][ prefix ][ value ];
-						}
-					} else {
-						_.each( value, function ( v, k ) {
-							processObj( v, prefix ? prefix + '.' + k : k, self.toCheck[ collection ] );
-						});
+				_.each( distinct, function ( v ) {
+					_.each( self.toCheck[ collection ][ key ][ v ], function ( fn ) {
+						fn( true );
+					});
+					if ( self.save_cache ) {
+						saveDependencyCache( collection, key, v );
 					}
-				})( doc, '' );
+					cbsRemaining--;
+					delete self.toCheck[ collection ][ key ][ v ];
+				});
+				if ( !( --searchesRemaining ) ) {
+					self.finish( cbsRemaining );
+				}
 			});
 		});
 	});
+	if ( !( --searchesRemaining ) ) {
+		self.finish( cbsRemaining );
+	}
 };
 
 MongoDependencyCheck.prototype.finish = function ( failedDependencies ) {
