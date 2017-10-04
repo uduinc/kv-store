@@ -296,7 +296,8 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 
 		dependencyChecker.run( );
 	} else {
-		obj.dependencies = { KEEP_ALIVE_STRING: true };
+		obj.dependencies = {};
+		obj.dependencies[ KEEP_ALIVE_STRING ] = true;
 		setInternal( );
 	}
 };
