@@ -613,12 +613,12 @@ MongoDependencyCheck.prototype.run = function ( ) {
 	if ( !_.size( self.toCheck ) ) {
 		return self.finish( );
 	}
-	var searchesRemaining = 0;
+	var searchesRemaining = 1;
 	// var searchesRemaining = _.size( self.toCheck );
 	// if ( !searchesRemaining ) return self.finish( );
 
 	var abort = false;
-	var cbsRemaining = 1;
+	var cbsRemaining = 0;
 	_.each( self.toCheck, function ( searchKeys, collection ) {
 		if ( abort ) return;
 		var searches = _.mapValues( searchKeys, function ( v ) {
