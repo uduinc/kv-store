@@ -3,7 +3,7 @@ var EventEmitter = require( 'events' ).EventEmitter;
 
 var _ = require( 'lodash' );
 var mongo = require( 'mongodb' ).MongoClient;
-var bson = new ( require( 'bson' ) ).BSONPure.BSON( );
+var bson = new ( require( 'bson' ) )( );
 var CryptoJS = require( 'crypto-js' );
 
 var utils = require( './utils' );
