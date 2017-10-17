@@ -3,7 +3,8 @@ var EventEmitter = require( 'events' ).EventEmitter;
 
 var _ = require( 'lodash' );
 var mongo = require( 'mongodb' ).MongoClient;
-var bson = new ( require( 'bson' ) )( );
+var BSON = require( 'bson' );
+var bson = new BSON( );
 var CryptoJS = require( 'crypto-js' );
 
 var utils = require( './utils' );
@@ -166,8 +167,11 @@ var flatten = function ( obj, prefix ) {
 };
 
 var escapeKeys = function ( obj ) {
-	if ( !obj || typeof obj !== 'object' || Array.isArray( obj ) || obj instanceof RegExp || obj instanceof Date ) {
+	if ( !obj || typeof obj !== 'object' || obj instanceof RegExp || obj instanceof Date || obj._bsontype === 'ObjectID' ) {
 		return obj;
+	}
+	if ( Array.isArray( obj ) ) {
+		return _.map( obj, escapeKeys );
 	}
 	var newObj = {};
 	_.each( _.keys( obj ), function ( k ) {
@@ -179,8 +183,11 @@ var escapeKeys = function ( obj ) {
 };
 
 var unescapeKeys = function ( obj ) {
-	if ( !obj || typeof obj !== 'object' || Array.isArray( obj ) || obj instanceof RegExp || obj instanceof Date ) {
+	if ( !obj || typeof obj !== 'object' || obj instanceof RegExp || obj instanceof Date || obj._bsontype === 'ObjectID'  ) {
 		return obj;
+	}
+	if ( Array.isArray( obj ) ) {
+		return _.map( obj, unescapeKeys );
 	}
 	return _.transform( obj, function ( result, v, k ) {
 		if ( v && typeof v === 'object' && !( Array.isArray( v ) || v instanceof RegExp || v instanceof Date ) ) {
