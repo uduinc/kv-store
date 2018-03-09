@@ -236,6 +236,7 @@ KVStore.prototype.get = function ( k, opts, cb ) {
 			}
 		});
 	})( 0 );
+	return k;
 };
 
 KVStore.prototype.getAll = function ( keys, opts, cb ) {
