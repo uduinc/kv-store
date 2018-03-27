@@ -33,7 +33,7 @@ RamTransport.prototype.set = function ( k, v, opts, cb ) {
 
 RamTransport.prototype.get = function ( k, cb ) {
 	var self = this;
-	if ( self.storage[ k ] ) {
+	if ( self.storage.hasOwnProperty( k ) ) {
 		self.unsetTimer( k );
 		self.setTimer( k );
 		process.nextTick( function ( ) {
@@ -45,6 +45,21 @@ RamTransport.prototype.get = function ( k, cb ) {
 		process.nextTick( function ( ) {
 			// console.log( 'RAM> <EMPTY>' );
 			cb( null );
+		});
+	}
+};
+
+RamTransport.prototype.has = function ( k, cb ) {
+	var self = this;
+	if ( self.storage.hasOwnProperty( k ) ) {
+		self.unsetTimer( k );
+		self.setTimer( k );
+		process.nextTick( function ( ) {
+			cb( null, true );
+		});
+	} else {
+		process.nextTick( function ( ) {
+			cb( null, false );
 		});
 	}
 };

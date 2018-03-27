@@ -62,6 +62,20 @@ Transport.prototype.__deleteBy = function ( meta, cb ) {
 	}
 };
 
+Transport.prototype.__has = function ( k, cb ) {
+	var self = this;
+
+	if ( !self.ready ) {
+		return cb( 'Transport not ready.' );
+	}
+	self.has( k, function ( err, has ) {
+		if ( err ) {
+			self.emit( 'error', err );
+		}
+		cb( err, has );
+	});
+};
+
 Transport.prototype.__get = function ( k, cb ) {
 	var self = this;
 

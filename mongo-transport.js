@@ -3,9 +3,7 @@ var EventEmitter = require( 'events' ).EventEmitter;
 
 var _ = require( 'lodash' );
 var mongo = require( 'mongodb' ).MongoClient;
-var BSON = require( 'bson' );
-var bson = new BSON( );
-var CryptoJS = require( 'crypto-js' );
+var objhash = require( 'node-object-hash' )( { coerce: false } ).hash;
 
 var utils = require( './utils' );
 var errs = require( './errors' );
@@ -26,6 +24,7 @@ function MongoTransport ( opts ) {
 	var self = this;
 
 	self.maxObjectSize = opts.maxObjectSize || 14000000;
+	self.absoluteObjectSizeCutoff = 200000000; // cannot stringify anything above 256mb; giving ourselves breathing room here
 
 	// 1 string char = 2 bytes
 	self.pieceLength = Math.min( self.maxObjectSize, opts.pieceSize || 10000000 ) / 2;
@@ -208,7 +207,7 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 		obj.expiration = new Date( Date.now( ) + opts.ttl );
 	}
 	obj.meta = opts.meta || {};
-	var metaSize = bson.calculateObjectSize( obj.meta );
+	var metaSize = utils.dataSize( obj.meta );
 	if ( metaSize > self.maxMetaSize ) {
 		var err = new Error( 'Could not insert; meta obj over size limit.' );
 		err.meta = {
@@ -232,11 +231,20 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 			updateObj[ '$addToSet' ] = { dependencies: obj.dependencies };
 		}
 
-		// NOTE: this will break for anything larger than ~695,000 times pieceSize (= 2*pieceLength).
+		// NOTE: pieces calc will break for anything larger than ~695,000 times pieceSize (= 2*pieceLength)
+		// due to the "master" document exceeding mongo's limitations on size
 		// Not an issue for the forseeable future, but something to keep in mind.
-		if ( bson.calculateObjectSize( obj ) > self.maxObjectSize ) {
+		let dataSize = utils.dataSize( obj );
+		if ( dataSize > self.absoluteObjectSizeCutoff ) {
+			return cb( 'Data too large to store' );
+		}
+		if ( dataSize > self.maxObjectSize ) {
 			// TODO: do this without relying on JSON.stringify
-			var str = JSON.stringify( obj.value );
+			try {
+				var str = JSON.stringify( obj.value );
+			} catch ( e ) {
+				return cb( e );
+			}
 			var keys = [];
 
 			// UnorderedBulkOp has better performance, but would break if multiple pieces are identical since
@@ -345,6 +353,12 @@ MongoTransport.prototype.getPieces = function ( pieces, cb, key, meta ) {
 				}
 			})( 0 );
 		});
+	});
+};
+
+MongoTransport.prototype.has = function ( k, cb ) {
+	this.collection.count( { key: k }, function ( err, count ) {
+		cb( err, !!count );
 	});
 };
 
@@ -532,7 +546,7 @@ MongoTransport.prototype.checkDependencies = function ( ) {
 
 var dependencyCache = {};
 function hashDependency ( collection, key, value ) {
-	return CryptoJS.MD5( JSON.stringify( arguments ) ).toString( );
+	return objhash( { collection, key, value } );
 }
 function removeDependencyCache ( hash ) {
 	if ( dependencyCache[ hash ] ) {
@@ -632,7 +646,7 @@ MongoDependencyCheck.prototype.run = function ( ) {
 			return Object.keys( v );
 		});
 		_.each( searches, function runDistinct ( list, key ) {
-			if ( bson.calculateObjectSize( list ) > MAX_DISTINCT_LIST_SIZE ) {
+			if ( utils.dataSize( list ) > MAX_DISTINCT_LIST_SIZE ) {
 				runDistinct( list.splice( list.length / 2 ), key );
 				runDistinct( list, key );
 				return;

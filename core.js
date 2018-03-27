@@ -47,6 +47,8 @@ KVStore.prototype.addTransport = function ( name, transport ) {
 KVStore.prototype.set = function ( k, v, opts, cb ) {
 	var self = this;
 
+	cb = cb || function ( ) { };
+
 	if ( typeof opts === 'function' ) {
 		cb = opts;
 		opts = {};
@@ -56,39 +58,51 @@ KVStore.prototype.set = function ( k, v, opts, cb ) {
 
 	var waitingCount = _.size( self.transports );
 	var errList = [];
-	var callback = function ( err ) {
-		if ( cb ) {
-			if ( err ) {
-				self.emit( 'error', err );
-				errList.push( err );
+	var transportCallback = function ( err ) {
+		if ( err ) {
+			self.emit( 'error', err );
+			errList.push( err );
+		}
+		if ( !( --waitingCount ) ) {
+			if ( !errList.length ) {
+				errList = null;
 			}
-			if ( !( --waitingCount ) ) {
-				if ( !errList.length ) {
-					errList = null;
-				}
-				process.nextTick( function ( ) {
-					cb( errList );
-				});
-			}
+			process.nextTick( function ( ) {
+				cb( errList );
+			});
 		}
 	};
 
-	if ( k === null ) {
-		k = 'v_' + utils.hash( v );
-	} else if ( typeof k !== 'string' ) {
-		k = 'k_' + utils.hash( k );
+	var setInternal = function ( k ) {
+		_.each( self.transports, function ( transport, name ) {
+			if ( opts.transports && !~opts.transports.indexOf( name ) ) {
+				return transportCallback( );
+			}
+			if ( opts.transportExclusions && ~opts.transportExclusions.indexOf( name ) ) {
+				return transportCallback( );
+			}
+			transport.__set( k, v, opts, transportCallback );
+		});
+		return k;
 	}
 
-	_.each( self.transports, function ( transport, name ) {
-		if ( opts.transports && !~opts.transports.indexOf( name ) ) {
-			return callback( );
-		}
-		if ( opts.transportExclusions && ~opts.transportExclusions.indexOf( name ) ) {
-			return callback( );
-		}
-		transport.__set( k, v, opts, callback );
-	});
-	return k;
+	if ( k === null ) {
+		var newKey = 'v_' + utils.hash( v );
+		self.has( newKey, function ( err, has ) {
+			if ( err ) {
+				cb( err );
+			} else if ( has ) {
+				cb( );
+			} else {
+				setInternal( newKey );
+			}
+		});
+		return newKey;
+	} else if ( typeof k !== 'string' ) {
+		return setInternal( 'k_' + utils.hash( k ) );
+	} else {
+		return setInternal( k );
+	}
 };
 
 KVStore.prototype.delete = function ( k, opts, cb ) {
@@ -177,6 +191,60 @@ KVStore.prototype.deleteBy = function ( search, opts, cb ) {
 
 KVStore.prototype.deleteByMeta = function ( meta, opts, cb ) {
 	this.deleteBy( { meta: meta }, opts, cb );
+};
+
+KVStore.prototype.has = function ( k, opts, cb ) {
+	var self = this;
+
+	if ( typeof opts === 'function' ) {
+		cb = opts;
+		opts = {};
+	} else if ( !opts ) {
+		opts = {};
+	}
+
+	if ( typeof k !== 'string' ) {
+		k = 'k_' + utils.hash( k );
+	}
+
+	if ( _.isNumber( opts.retry ) && opts.retry > 0 ) {
+		var actualCb = cb;
+		cb = function ( err, has ) {
+			if ( err || !has ) {
+				setTimeout( function ( self, k, opts, cb ) {
+					self.has( k, _.merge( opts, { retry: opts.retry - 1 } ), cb );
+				}, opts.retryDelay || 1000, self, k, opts, actualCb );
+			} else {
+				actualCb( err, has );
+			}
+		};
+	}
+
+	( function checkNext( i ) {
+		if ( i >= self.priorityList.length ) {
+			return cb( null, false );
+		}
+
+		var next = self.priorityList[ i ];
+		if ( opts.transports && !~opts.transports.indexOf( next.name ) ) {
+			return checkNext( i+1 );
+		}
+		if ( opts.transportExclusions && ~opts.transportExclusions.indexOf( next.name ) ) {
+			return checkNext( i+1 );
+		}
+		next.transport.__has( k, function ( err, has ) {
+			if ( err ) {
+				self.emit( 'error', err );
+			}
+
+			if ( has ) {
+				cb( err, true );
+			} else {
+				checkNext( i+1 );
+			}
+		});
+	})( 0 );
+	return k;
 };
 
 KVStore.prototype.get = function ( k, opts, cb ) {
