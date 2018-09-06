@@ -189,7 +189,7 @@ var unescapeKeys = function ( obj ) {
 		return _.map( obj, unescapeKeys );
 	}
 	return _.transform( obj, function ( result, v, k ) {
-		if ( v && typeof v === 'object' && !( Array.isArray( v ) || v instanceof RegExp || v instanceof Date ) ) {
+		if ( v && typeof v === 'object' && !( v instanceof RegExp || v instanceof Date ) ) {
 			result[ k.split( DOT_SEPARATOR_REPLACEMENT ).join( '.' ).split( DOLLAR_SEPARATOR_REPLACEMENT ).join( '$' ) ] = unescapeKeys( v );
 		} else {
 			result[ k.split( DOT_SEPARATOR_REPLACEMENT ).join( '.' ).split( DOLLAR_SEPARATOR_REPLACEMENT ).join( '$' ) ] = v;
