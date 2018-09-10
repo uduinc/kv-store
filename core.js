@@ -73,36 +73,22 @@ KVStore.prototype.set = function ( k, v, opts, cb ) {
 		}
 	};
 
-	var setInternal = function ( k ) {
-		_.each( self.transports, function ( transport, name ) {
-			if ( opts.transports && !~opts.transports.indexOf( name ) ) {
-				return transportCallback( );
-			}
-			if ( opts.transportExclusions && ~opts.transportExclusions.indexOf( name ) ) {
-				return transportCallback( );
-			}
-			transport.__set( k, v, opts, transportCallback );
-		});
-		return k;
+	if ( k === null ) {
+		k = 'v_' + utils.hash( v );
+	} else if ( typeof k !== 'string' ) {
+		k = 'k_' + utils.hash( k );
 	}
 
-	if ( k === null ) {
-		var newKey = 'v_' + utils.hash( v );
-		self.has( newKey, function ( err, has ) {
-			if ( err ) {
-				cb( err );
-			} else if ( has ) {
-				cb( );
-			} else {
-				setInternal( newKey );
-			}
-		});
-		return newKey;
-	} else if ( typeof k !== 'string' ) {
-		return setInternal( 'k_' + utils.hash( k ) );
-	} else {
-		return setInternal( k );
-	}
+	_.each( self.transports, function ( transport, name ) {
+		if ( opts.transports && !~opts.transports.indexOf( name ) ) {
+			return transportCallback( );
+		}
+		if ( opts.transportExclusions && ~opts.transportExclusions.indexOf( name ) ) {
+			return transportCallback( );
+		}
+		transport.__set( k, v, opts, transportCallback );
+	});
+	return k;
 };
 
 KVStore.prototype.delete = function ( k, opts, cb ) {
