@@ -39,7 +39,7 @@ RamTransport.prototype.get = function ( k, cb ) {
 		process.nextTick( function ( ) {
 			// console.log( 'RAM>', self.storage[ k ].value );
 			// console.log( 'RAM> FOUND' );
-			cb( null, _.cloneDeep( self.storage[ k ].value ), k, _.cloneDeep( self.storage[ k ].meta ) );
+			cb( null, self.storage[ k ].value, k, _.cloneDeep( self.storage[ k ].meta ) );
 		});
 	} else {
 		process.nextTick( function ( ) {

@@ -281,7 +281,7 @@ KVStore.prototype.get = function ( k, opts, cb ) {
 				_.each( pullers, function ( t ) {
 					t.__set( key, value, { meta: meta, pulled: true } );
 				});
-				cb( err, value, key, meta );
+				cb( err, _.cloneDeep( value ), key, _.cloneDeep( meta ) );
 			} else {
 				if ( next.transport.pull ) {
 					pullers.push( next.transport );
