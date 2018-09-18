@@ -10,5 +10,8 @@ exports.hash = function ( input ) {
 
 exports.dataSize = function ( input ) {
 	// return JSON.stringify( input ).length*2;
+	if ( input === null || input === undefined ) {
+		return bson.calculateObjectSize( {} );
+	}
 	return bson.calculateObjectSize( input );
 };
