@@ -150,10 +150,15 @@ var flatten = function ( obj, prefix ) {
 	if ( !obj || typeof obj !== 'object' || Array.isArray( obj ) || obj instanceof RegExp || obj instanceof Date ) {
 		return obj;
 	}
-	prefix = prefix ? prefix + '.' : '';
 	var newObj = {};
+	var keys = _.keys( obj );
+	if ( _.some( keys, function ( k ) { return k.startsWith( '$' ) } ) ) {
+		newObj[ prefix ] = obj;
+		return newObj;
+	}
+	prefix = prefix ? prefix + '.' : '';
 	// looping over obj keys instead of obj itself in case obj contains "length", which lodash treats as array-like
-	_.each( _.keys( obj ), function ( k ) {
+	_.each( keys, function ( k ) {
 		var v = obj[ k ];
 		k = k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT );
 		if ( v && typeof v === 'object' && !( Array.isArray( v ) || v instanceof RegExp || v instanceof Date ) ) {

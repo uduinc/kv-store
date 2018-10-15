@@ -92,11 +92,58 @@ RamTransport.prototype.deleteBy = function ( search, cb ) {
 	var self = this;
 	var keys = _.keys( self.storage );
 	var numKeys = keys.length;
+
+	var hasComparator = function ( obj ) {
+		return obj.hasOwnProperty( '$neq' )
+			|| obj.hasOwnProperty( '$gt' )
+			|| obj.hasOwnProperty( '$lt' )
+			|| obj.hasOwnProperty( '$gte' )
+			|| obj.hasOwnProperty( '$lte' )
+			|| obj.hasOwnProperty( '$in' )
+			|| obj.hasOwnProperty( '$nin' );
+	}
+
+	var compare = function ( a, b ) {
+		if ( !a || typeof a !== 'object' || !b || typeof b !== 'object' ) return a === b;
+		var bKeys = _.keys( b );
+
+		var matches = true;
+		for ( var i=0; i<bKeys.length && matches; i++ ) {
+			var k = bKeys[ i ];
+			if ( b[ k ] && typeof b[ k ] === 'object' && hasComparator( b[ k ] ) ) {
+				if ( b[ k ].$neq ) {
+					matches = matches && a[ k ] !== b[ k ].$neq;
+				}
+				if ( b[ k ].$gt ) {
+					matches = matches && a[ k ] > b[ k ].$gt;
+				}
+				if ( b[ k ].$lt ) {
+					matches = matches && a[ k ] < b[ k ].$lt;
+				}
+				if ( b[ k ].$gte ) {
+					matches = matches && a[ k ] >= b[ k ].$gte;
+				}
+				if ( b[ k ].$lte ) {
+					matches = matches && a[ k ] <= b[ k ].$lte;
+				}
+				if ( b[ k ].$in && Array.isArray( b[ k ].$in ) ) {
+					matches = matches && b[ k ].$in.indexOf( a[ k ] ) !== -1;
+				}
+				if ( b[ k ].$nin && Array.isArray( b[ k ].$nin ) ) {
+					matches = matches && b[ k ].$nin.indexOf( a[ k ] ) === -1;
+				}
+			} else {
+				matches = compare( a[ k ], b[ k ] );
+			}
+		}
+		return matches;
+	};
+
 	( function deleteByInternal ( idx ) {
 		var stop = idx + 100;
 		for ( var i=idx; i<stop && i<numKeys; i++ ) {
 			var key = keys[ i ];
-			if ( self.storage[ key ] && _.isMatch( self.storage[ key ], search ) ) {
+			if ( self.storage[ key ] && compare( self.storage[ key ] ) ) {
 				self.delete( key );
 			}
 		}
