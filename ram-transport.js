@@ -143,7 +143,7 @@ RamTransport.prototype.deleteBy = function ( search, cb ) {
 		var stop = idx + 100;
 		for ( var i=idx; i<stop && i<numKeys; i++ ) {
 			var key = keys[ i ];
-			if ( self.storage[ key ] && compare( self.storage[ key ] ) ) {
+			if ( self.storage[ key ] && compare( self.storage[ key ], search ) ) {
 				self.delete( key );
 			}
 		}
