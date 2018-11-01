@@ -335,7 +335,7 @@ KVStore.prototype.getAll = function ( keys, opts, cb ) {
 	})( 0 );
 };
 
-KVStore.prototype.findByMeta = function ( meta, opts, cb ) {
+KVStore.prototype.findBy = function ( search, opts, cb ) {
 	var self = this;
 
 	if ( typeof opts === 'function' ) {
@@ -357,7 +357,7 @@ KVStore.prototype.findByMeta = function ( meta, opts, cb ) {
 		if ( opts.transportExclusions && ~opts.transportExclusions.indexOf( next.name ) ) {
 			return findNext( i-1 );
 		}
-		next.transport.__findByMeta( meta, function ( err, v ) {
+		next.transport.__findBy( search, function ( err, v ) {
 			if ( err ) {
 				self.emit( 'error', err );
 			}
@@ -368,6 +368,66 @@ KVStore.prototype.findByMeta = function ( meta, opts, cb ) {
 			}
 		});
 	})( self.priorityList.length-1 );
+};
+
+KVStore.prototype.findByMeta = function ( meta, opts, cb ) {
+	this.findBy( { meta: meta }, opts, cb );
+};
+
+KVStore.prototype.update = function ( k, update, opts, cb ) {
+	var self = this;
+
+	if ( typeof opts === 'function' ) {
+		cb = opts;
+		opts = {};
+	} else if ( !opts ) {
+		opts = {};
+	}
+
+	var waitingCount = _.size( self.transports );
+	var errList = [];
+	var transportCallback = function ( err ) {
+		if ( err ) {
+			self.emit( 'error', err );
+			errList.push( err );
+		}
+		if ( !( --waitingCount ) ) {
+			if ( !errList.length ) {
+				errList = null;
+			}
+			process.nextTick( function ( ) {
+				cb( errList );
+			});
+		}
+	};
+
+	if ( k === null ) {
+		if ( opts.upsert ) {
+			self.set( k, update, opts, cb );
+		} else {
+			cb( );
+		}
+		return;
+	}
+
+	if ( typeof k !== 'string' ) {
+		k = 'k_' + utils.hash( k );
+	}
+
+	if ( !update || typeof update !== 'object' || Array.isArray( update ) ) {
+		return cb( 'Invalid update value' );
+	}
+
+	_.each( self.transports, function ( transport, name ) {
+		if ( opts.transports && !~opts.transports.indexOf( name ) ) {
+			return transportCallback( );
+		}
+		if ( opts.transportExclusions && ~opts.transportExclusions.indexOf( name ) ) {
+			return transportCallback( );
+		}
+		transport.__update( k, update, opts, transportCallback );
+	});
+	return k;
 };
 
 KVStore.prototype.ready = function ( ) {

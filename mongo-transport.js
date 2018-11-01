@@ -99,53 +99,6 @@ function MongoTransport ( opts ) {
 
 util.inherits( MongoTransport, Transport );
 
-// helper functions
-MongoTransport.prototype.checkOneDependent = function ( dependencies, cb ) {
-	var self = this;
-	var depRemaining = _.keys( dependencies ).length;
-	var allowed = true;
-	var abort = false;
-
-	var searches = {};
-
-
-	_.each( dependencies, function ( dv, dk ) {
-		if ( abort || !allowed ) return false;
-
-		if ( dk === KEEP_ALIVE_STRING && dv ) {
-			cb( null, true );
-			abort = true;
-			return false;
-		}
-
-		var spl = dk.split( DOT_SEPARATOR_REPLACEMENT );
-		var collection = self.db.collection( spl.shift( ) );
-
-		var search = {};
-		search[ spl.join( '.' ) ] = dv;
-
-		// console.log( 'Checking dependency:', search );
-
-		collection.count( search, function ( err, count ) {
-			if ( err ) {
-				console.error( 'Error checking dependency existence in MongoTransport:', err );
-				abort = true;
-				cb( err );
-			} else {
-				// console.log( 'Got count:', count );
-				if ( allowed && !abort ) {
-					if ( !count ) {
-						allowed = false;
-						cb( null, false );
-					} else if ( !( --depRemaining ) ) {
-						cb( null, true );
-					}
-				}
-			}
-		});
-	});
-};
-
 var flatten = function ( obj, prefix ) {
 	if ( !obj || typeof obj !== 'object' || Array.isArray( obj ) || obj instanceof RegExp || obj instanceof Date ) {
 		return obj;
@@ -322,6 +275,23 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 	}
 };
 
+MongoTransport.prototype.update = function ( k, update, opts, cb ) {
+	// TODO: Will BREAK any items split into pieces. Fix!
+	var obj = flatten( update, 'value' );
+	if ( opts.expiration ) {
+		obj.expiration = new Date( opts.expiration );
+	} else if ( opts.ttl ) {
+		obj.expiration = new Date( Date.now( ) + opts.ttl );
+	}
+	obj = { $set: obj };
+	if ( opts.upsert ) {
+		obj.$setOnInsert = { dependencies: {} };
+		obj.$setOnInsert.dependencies[ KEEP_ALIVE_STRING ] = true;
+	}
+
+	this.collection.update( { key: k }, obj, { upsert: !!opts.upsert }, cb );
+};
+
 MongoTransport.prototype.getPieces = function ( pieces, cb, key, meta ) {
 	this.collection.find( { key: { $in: pieces } }, function ( err, cursor ) {
 		if ( err ) {
@@ -422,11 +392,11 @@ MongoTransport.prototype.getAll = function ( keys, cb ) {
 	});
 };
 
-MongoTransport.prototype.findByMeta = function ( search, cb ) {
+MongoTransport.prototype.findBy = function ( search, cb ) {
 	var arr = [];
 	var i = 0;
 	var done = false;
-	this.collection.find( flatten( search, 'meta' ), { value: 1, _id: 0 } ).each( function ( err, d ) {
+	this.collection.find( flatten( search ), { value: 1, _id: 0 } ).each( function ( err, d ) {
 		if ( done ) return;
 		if ( err || !d ) {
 			done = true;
@@ -608,25 +578,39 @@ MongoDependencyCheck.prototype.addDependencyCheck = function ( dependencies, cb 
 			console.error( '>>>>>', k, v );
 			console.error( '-----', dependencies );
 		}
-		var spl = k.split( DOT_SEPARATOR_REPLACEMENT );
-		var collection = spl.shift( );
-		var searchKey = spl.join( '.' );
-		if ( checkDependencyCache( collection, searchKey, v ) ) {
-			return callback( true );
-		}
+		var multiDependencySpl = k.split( DOT_SEPARATOR_REPLACEMENT ).join( '.' ).split( '|' );
+		var multiDependencyWaiting = multiDependencySpl.length;
+		var multiDependencyCallback = function ( bool ) {
+			if ( bool && multiDependencyWaiting > 0 ) {
+				multiDependencyWaiting = -1;
+				return callback( true );
+			}
+			if ( !( --multiDependencyWaiting ) ) {
+				callback( false );
+			}
+		};
 
-		if ( !self.toCheck[ collection ] ) {
-			self.toCheck[ collection ] = {};
-			self.toCheck[ collection ][ searchKey ] = {};
-		} else if ( !self.toCheck[ collection ][ searchKey ] ) {
-			self.toCheck[ collection ][ searchKey ] = {};
-		}
+		_.each( multiDependencySpl, function ( k ) {
+				var spl = k.split( '.' );
+				var collection = spl.shift( );
+				var searchKey = spl.join( '.' );
+				if ( checkDependencyCache( collection, searchKey, v ) ) {
+					return multiDependencyCallback( true );
+				}
 
-		if ( !self.toCheck[ collection ][ searchKey ][ v ] ) {
-			self.toCheck[ collection ][ searchKey ][ v ] = [ callback ];
-		} else {
-			self.toCheck[ collection ][ searchKey ][ v ].push( callback );
-		}
+				if ( !self.toCheck[ collection ] ) {
+					self.toCheck[ collection ] = {};
+					self.toCheck[ collection ][ searchKey ] = {};
+				} else if ( !self.toCheck[ collection ][ searchKey ] ) {
+					self.toCheck[ collection ][ searchKey ] = {};
+				}
+
+				if ( !self.toCheck[ collection ][ searchKey ][ v ] ) {
+					self.toCheck[ collection ][ searchKey ][ v ] = [ multiDependencyCallback ];
+				} else {
+					self.toCheck[ collection ][ searchKey ][ v ].push( multiDependencyCallback );
+				}
+		});
 	});
 };
 

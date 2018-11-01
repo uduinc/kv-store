@@ -39,6 +39,27 @@ Transport.prototype.__set = function ( k, v, opts, cb ) {
 	});
 };
 
+Transport.prototype.__update = function ( k, update, opts, cb ) {
+	var self = this;
+
+	if ( !self.ready ) {
+		return;
+	}
+	self.__numWaiting++;
+	self.update( k, update, opts, function ( err ) {
+		self.__numWaiting--;
+		if ( self.empty ) {
+			self.emit( 'empty' );
+		}
+		if ( err ) {
+			self.emit( 'error', err );
+		}
+		if ( cb ) {
+			cb( err );
+		}
+	});
+};
+
 Transport.prototype.__deleteBy = function ( meta, cb ) {
 	var self = this;
 
@@ -114,14 +135,14 @@ Transport.prototype.__getAll = function ( keys, cb ) {
 	}
 };
 
-Transport.prototype.__findByMeta = function ( meta, cb ) {
+Transport.prototype.__findBy = function ( meta, cb ) {
 	var self = this;
 
 	if ( !self.ready ) {
 		return cb( 'Transport not ready.' );
 	}
-	if ( typeof self.findByMeta === 'function' ) {
-		self.findByMeta( meta, function ( err, values ) {
+	if ( typeof self.findBy === 'function' ) {
+		self.findBy( meta, function ( err, values ) {
 			if ( err ) {
 				self.emit( 'error', err );
 			}

@@ -31,6 +31,31 @@ RamTransport.prototype.set = function ( k, v, opts, cb ) {
 	}
 };
 
+RamTransport.prototype.update = function ( k, update, opts, cb ) {
+	var self = this;
+	if ( self.storage.hasOwnProperty( k ) ) {
+		if ( typeof k === 'object' && !Array.isArray( k ) ) {
+			self.storage[ k ].value = _.assign( {}, self.storage[ k ].value, update );
+			if ( utils.dataSize( self.storage[ k ].value ) >= self.maxDataSize ) {
+				// object is now too large to keep in ram
+				return self.delete( k, cb );
+			}
+		} else {
+			if ( cb ) {
+				process.nextTick( function ( ) {
+					cb( 'Cannot update non-object value with key', k );
+				});
+			}
+			return;
+		}
+		self.unsetTimer( k );
+		self.setTimer( k );
+	}
+	if ( cb ) {
+		process.nextTick( cb );
+	}
+};
+
 RamTransport.prototype.get = function ( k, cb ) {
 	var self = this;
 	if ( self.storage.hasOwnProperty( k ) ) {
