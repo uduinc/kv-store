@@ -292,6 +292,13 @@ MongoTransport.prototype.update = function ( k, update, opts, cb ) {
 	this.collection.update( { key: k }, obj, { upsert: !!opts.upsert }, cb );
 };
 
+MongoTransport.prototype.addDependencies = function ( k, dependencies, cb ) {
+	const update = _.mapKeys( dependencies, function ( v, k ) {
+		return 'dependencies.'+k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT );
+	});
+	this.collection.update( { key: k }, { $set: update }, cb );
+};
+
 MongoTransport.prototype.getPieces = function ( pieces, cb, key, meta ) {
 	this.collection.find( { key: { $in: pieces } }, function ( err, cursor ) {
 		if ( err ) {
