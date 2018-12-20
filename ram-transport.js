@@ -34,7 +34,7 @@ RamTransport.prototype.set = function ( k, v, opts, cb ) {
 RamTransport.prototype.update = function ( k, update, opts, cb ) {
 	var self = this;
 	if ( self.storage.hasOwnProperty( k ) ) {
-		if ( typeof k === 'object' && !Array.isArray( k ) ) {
+		if ( typeof self.storage[ k ].value === 'object' && !Array.isArray( self.storage[ k ].value ) ) {
 			self.storage[ k ].value = _.assign( {}, self.storage[ k ].value, update );
 			if ( utils.dataSize( self.storage[ k ].value ) >= self.maxDataSize ) {
 				// object is now too large to keep in ram
@@ -43,7 +43,7 @@ RamTransport.prototype.update = function ( k, update, opts, cb ) {
 		} else {
 			if ( cb ) {
 				process.nextTick( function ( ) {
-					cb( 'Cannot update non-object value with key', k );
+					cb( 'Cannot update non-object value with key ' + k );
 				});
 			}
 			return;
