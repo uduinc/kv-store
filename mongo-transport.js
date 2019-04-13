@@ -470,8 +470,8 @@ MongoTransport.prototype.checkDependencies = function ( ) {
 
 		var checkDone = function ( ) {
 			if ( !( --remaining ) && hadFailures ) {
-				if ( keysToRemove.length ) {
-					batch.find( { key: { $in: keysToRemove } } ).remove( );
+				while ( keysToRemove.length ) {
+					batch.find( { key: { $in: keysToRemove.splice( 0, 10000 ) } } ).remove( );
 				}
 				batch.execute( function ( err ) {
 					if ( err ) {
