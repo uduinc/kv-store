@@ -237,37 +237,41 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 			return k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT );
 		});
 
-		var dependencyChecker = new MongoDependencyCheck( self.db, { gracePeriod: self.dependencyGracePeriod } );
-		dependencyChecker.on( 'error', self.emit.bind( self, 'error' ) );
+		if ( opts.skipInitialDependencyCheck ) {
+			setInternal( );
+		} else {
+			var dependencyChecker = new MongoDependencyCheck( self.db, { gracePeriod: self.dependencyGracePeriod } );
+			dependencyChecker.on( 'error', self.emit.bind( self, 'error' ) );
 
-		var gotCB = false;
-		dependencyChecker.addDependencyCheck( obj.dependencies, function ( allowed ) {
-			if ( gotCB ) return;
-			gotCB = true;
-			if ( allowed ) {
-				setInternal( );
-			} else {
-				var err = new Error( 'Could not insert; dependency not met.' );
+			var gotCB = false;
+			dependencyChecker.addDependencyCheck( obj.dependencies, function ( allowed ) {
+				if ( gotCB ) return;
+				gotCB = true;
+				if ( allowed ) {
+					setInternal( );
+				} else {
+					var err = new Error( 'Could not insert; dependency not met.' );
+					err.meta = {
+						key: k,
+						dependencies: opts.dependencies
+					};
+					return cb( err );
+				}
+			});
+
+			dependencyChecker.on( 'destroy', function ( ) {
+				if ( gotCB ) return;
+				gotCB = true;
+				var err = new Error( 'Error checking dependencies when inserting.' );
 				err.meta = {
 					key: k,
 					dependencies: opts.dependencies
 				};
 				return cb( err );
-			}
-		});
+			});
 
-		dependencyChecker.on( 'destroy', function ( ) {
-			if ( gotCB ) return;
-			gotCB = true;
-			var err = new Error( 'Error checking dependencies when inserting.' );
-			err.meta = {
-				key: k,
-				dependencies: opts.dependencies
-			};
-			return cb( err );
-		});
-
-		dependencyChecker.run( );
+			dependencyChecker.run( );
+		}
 	} else {
 		obj.dependencies = {};
 		obj.dependencies[ KEEP_ALIVE_STRING ] = true;
