@@ -23,6 +23,8 @@ function MongoTransport ( opts ) {
 
 	var self = this;
 
+	self._currentlySaving = {};
+
 	self.maxObjectSize = opts.maxObjectSize || 14000000;
 	self.absoluteObjectSizeCutoff = 200000000; // cannot stringify anything above 256mb; giving ourselves breathing room here
 
@@ -196,38 +198,47 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 		if ( dataSize > self.absoluteObjectSizeCutoff ) {
 			return cb( 'Data too large to store' );
 		}
-		if ( dataSize > self.maxObjectSize ) {
-			// TODO: do this without relying on JSON.stringify
-			try {
-				var str = JSON.stringify( obj.value );
-			} catch ( e ) {
-				return cb( e );
-			}
-			var keys = [];
 
-			// UnorderedBulkOp has better performance, but would break if multiple pieces are identical since
-			// upsert is not atomic; Ordered also allows us to include the primary doc in the batch
-			var batch = self.collection.initializeOrderedBulkOp( );
-			for ( var idx = 0; idx < str.length; idx += self.pieceLength ) {
-				var piece = str.slice( idx, idx+self.pieceLength );
-				var key = utils.hash( piece );
-				var pieceObj = _.assign( {}, updateObj, {
-					$set: {
-						key: key,
-						value: piece,
-						meta: obj.meta
-					}
-				});
-				keys.push( key );
-				batch.find( { key: key } ).upsert( ).updateOne( pieceObj );
+		self._currentlySaving[ k ] = new Promise( function ( resolve, reject ) {
+			function done ( err ) {
+				resolve( );
+				delete self._currentlySaving[ k ];
+				cb( err );
 			}
-			updateObj[ '$set' ].value = keys;
-			updateObj[ '$set' ].piece_split = true;
-			batch.find( { key: k } ).upsert( ).updateOne( updateObj );
-			batch.execute( cb );
-		} else {
-			self.collection.update( { key: k }, updateObj, { upsert: true }, cb );
-		}
+
+			if ( dataSize > self.maxObjectSize ) {
+				// TODO: do this without relying on JSON.stringify
+				try {
+					var str = JSON.stringify( obj.value );
+				} catch ( e ) {
+					return cb( e );
+				}
+				var keys = [];
+
+				// UnorderedBulkOp has better performance, but would break if multiple pieces are identical since
+				// upsert is not atomic; Ordered also allows us to include the primary doc in the batch
+				var batch = self.collection.initializeOrderedBulkOp( );
+				for ( var idx = 0; idx < str.length; idx += self.pieceLength ) {
+					var piece = str.slice( idx, idx+self.pieceLength );
+					var key = utils.hash( piece );
+					var pieceObj = _.assign( {}, updateObj, {
+						$set: {
+							key: key,
+							value: piece,
+							meta: obj.meta
+						}
+					});
+					keys.push( key );
+					batch.find( { key: key } ).upsert( ).updateOne( pieceObj );
+				}
+				updateObj[ '$set' ].value = keys;
+				updateObj[ '$set' ].piece_split = true;
+				batch.find( { key: k } ).upsert( ).updateOne( updateObj );
+				batch.execute( done );
+			} else {
+				self.collection.update( { key: k }, updateObj, { upsert: true }, done );
+			}
+		});
 	};
 
 
@@ -350,56 +361,63 @@ MongoTransport.prototype.has = function ( k, cb ) {
 
 MongoTransport.prototype.get = function ( k, cb ) {
 	var self = this;
-	self.collection.findOne( { key: k }, function ( err, data ) {
-		if ( err || !data ) {
-			// console.log( 'DB >', err ? 'ERR' : '<EMPTY>' );
-			cb( err );
-		} else {
-			if ( data.piece_split ) {
-				self.getPieces( data.value, cb, k, data.meta );
+	var wait = self._currentlySaving[ k ] || Promise.resolve( );
+	wait.catch( () => {} ).then( () => {
+		self.collection.findOne( { key: k }, function ( err, data ) {
+			if ( err || !data ) {
+				// console.log( 'DB >', err ? 'ERR' : '<EMPTY>' );
+				cb( err );
 			} else {
-				// console.log( 'DB >', data.value );
-				// console.log( 'DB > FOUND' );
-				cb( err, unescapeKeys( data.value ), k, data.meta );
+				if ( data.piece_split ) {
+					self.getPieces( data.value, cb, k, data.meta );
+				} else {
+					// console.log( 'DB >', data.value );
+					// console.log( 'DB > FOUND' );
+					cb( err, unescapeKeys( data.value ), k, data.meta );
+				}
 			}
-		}
+		});
 	});
 };
 
 MongoTransport.prototype.getAll = function ( keys, cb ) {
 	var self = this;
-	self.collection.find( { key: { $in: keys } } ).toArray( function ( err, data ) {
-		if ( err || !data.length) {
-			return cb( err, {} );
-		}
+	const waiting = keys.filter( k => this._currentlySaving[ k ] ).map( k => this._currentlySaving[ k ] );
 
-		var returnData = {};
-		var numWaiting = 1;
-		var abort = false;
+	Promise.all( waiting ).catch( () => {} ).then( () => {
+		self.collection.find( { key: { $in: keys } } ).toArray( function ( err, data ) {
+			if ( err || !data.length) {
+				return cb( err, {} );
+			}
 
-		var checkDone = function ( ) {
-			if ( abort ) return;
-			if ( !( --numWaiting ) ) {
-				cb( null, returnData );
+			var returnData = {};
+			var numWaiting = 1;
+			var abort = false;
+
+			var checkDone = function ( ) {
+				if ( abort ) return;
+				if ( !( --numWaiting ) ) {
+					cb( null, returnData );
+				}
 			}
-		}
-		_.each( data, function ( d ) {
-			if ( abort ) return false;
-			if ( d.piece_split ) {
-				numWaiting++;
-				self.getPieces( d.value, function ( err, val ) {
-					if ( err ) {
-						abort = true;
-						return cb( err );
-					}
-					returnData[ d.key ] = val;
-					checkDone( );
-				});
-			} else {
-				returnData[ d.key ] = d.value;
-			}
+			_.each( data, function ( d ) {
+				if ( abort ) return false;
+				if ( d.piece_split ) {
+					numWaiting++;
+					self.getPieces( d.value, function ( err, val ) {
+						if ( err ) {
+							abort = true;
+							return cb( err );
+						}
+						returnData[ d.key ] = val;
+						checkDone( );
+					});
+				} else {
+					returnData[ d.key ] = d.value;
+				}
+			});
+			checkDone( );
 		});
-		checkDone( );
 	});
 };
 
