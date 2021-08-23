@@ -429,7 +429,7 @@ MongoTransport.prototype.delete = function ( k, cb ) {
 
 	var self = this;
 
-	self.collection.findOne( { key: k }, { piece_split: 1 }, function ( err, data ) {
+	self.collection.findOne( { key: k }, { projection: { piece_split: 1 } }, function ( err, data ) {
 		if ( err ) {
 			if ( cb ) {
 				cb( err );
