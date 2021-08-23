@@ -44,25 +44,17 @@ function MongoTransport ( opts ) {
 	if ( opts.db ) {
 		self.db = opts.db;
 		self.collection = self.db.collection( self.collectionName );
-		self.collection.ensureIndex( 'key', { unique: true }, function ( err ) {
+		self.collection.createIndexes([
+			{ key: { key: 1 }, unique: true, background: true },
+			{ key: { expiration: 1 }, expireAfterSeconds: 0, sparse: true, background: true },
+			{ key: { dependencies: 1 }, sparse: true, background: true }
+		], function ( err ) {
 			if ( err ) {
 				throw err;
 			}
 
-			self.collection.ensureIndex( 'expiration', { expireAfterSeconds: 0, sparse: true }, function ( err ) {
-				if ( err ) {
-					throw err;
-				}
-
-				self.collection.ensureIndex( 'dependencies', { sparse: true }, function ( err ) {
-					if ( err ) {
-						throw err;
-					}
-
-					self.ready = true;
-					self.dependencyInterval = setInterval( self.checkDependencies.bind( self ), opts.dependencyInterval );
-				});
-			});
+			self.ready = true;
+			self.dependencyInterval = setInterval( self.checkDependencies.bind( self ), opts.dependencyInterval );
 		});
 	} else if ( opts.connection_string ) {
 		mongo.connect( opts.connection_string, function ( err, db ) {
@@ -73,25 +65,17 @@ function MongoTransport ( opts ) {
 			self.db = db;
 			self.collection = db.collection( self.collectionName );
 
-			self.collection.ensureIndex( 'key', { unique: true }, function ( err ) {
+			self.collection.createIndexes([
+				{ key: { key: 1 }, unique: true, background: true },
+				{ key: { expiration: 1 }, expireAfterSeconds: 0, sparse: true, background: true },
+				{ key: { dependencies: 1 }, sparse: true, background: true }
+			], function ( err ) {
 				if ( err ) {
 					throw err;
 				}
 
-				self.collection.ensureIndex( 'expiration', { expireAfterSeconds: 0, sparse: true }, function ( err ) {
-					if ( err ) {
-						throw err;
-					}
-
-					self.collection.ensureIndex( 'dependencies', { sparse: true }, function ( err ) {
-						if ( err ) {
-							throw err;
-						}
-
-						self.ready = true;
-						self.dependencyInterval = setInterval( self.checkDependencies.bind( self ), opts.dependencyInterval );
-					});
-				});
+				self.ready = true;
+				self.dependencyInterval = setInterval( self.checkDependencies.bind( self ), opts.dependencyInterval );
 			});
 		});
 	} else {
@@ -236,7 +220,7 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 				batch.find( { key: k } ).upsert( ).updateOne( updateObj );
 				batch.execute( done );
 			} else {
-				self.collection.update( { key: k }, updateObj, { upsert: true }, done );
+				self.collection.updateOne( { key: k }, updateObj, { upsert: true }, done );
 			}
 		});
 	};
@@ -304,14 +288,14 @@ MongoTransport.prototype.update = function ( k, update, opts, cb ) {
 		obj.$setOnInsert.dependencies[ KEEP_ALIVE_STRING ] = true;
 	}
 
-	this.collection.update( { key: k }, obj, { upsert: !!opts.upsert }, cb );
+	this.collection.updateOne( { key: k }, obj, { upsert: !!opts.upsert }, cb );
 };
 
 MongoTransport.prototype.addDependencies = function ( k, dependencies, cb ) {
 	const deps = _.mapKeys( dependencies, function ( v, k ) {
 		return k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT );
 	});
-	this.collection.update( { key: k }, { $addToSet: { dependencies: deps } }, cb );
+	this.collection.updateOne( { key: k }, { $addToSet: { dependencies: deps } }, cb );
 };
 
 MongoTransport.prototype.getPieces = function ( pieces, cb, key, meta ) {
@@ -354,7 +338,7 @@ MongoTransport.prototype.getPieces = function ( pieces, cb, key, meta ) {
 };
 
 MongoTransport.prototype.has = function ( k, cb ) {
-	this.collection.count( { key: k }, function ( err, count ) {
+	this.collection.countDocuments( { key: k }, function ( err, count ) {
 		cb( err, !!count );
 	});
 };
@@ -454,15 +438,15 @@ MongoTransport.prototype.delete = function ( k, cb ) {
 		}
 		if ( data && data.piece_split ) {
 			var pieces = data.value.concat( k );
-			self.collection.remove( { key: { $in: data.value.concat( k ) } }, callback );
+			self.collection.deleteMany( { key: { $in: data.value.concat( k ) } }, callback );
 		} else {
-			self.collection.remove( { key: k }, callback );
+			self.collection.deleteOne( { key: k }, callback );
 		}
 	});
 };
 
 MongoTransport.prototype.deleteBy = function ( search, cb ) {
-	this.collection.remove( flatten( search ), cb );
+	this.collection.deleteMany( flatten( search ), cb );
 };
 
 MongoTransport.prototype.checkDependencies = function ( ) {
