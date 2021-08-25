@@ -305,26 +305,7 @@ MongoTransport.prototype.getPieces = function ( pieces, cb, key, meta ) {
 			return cb( err );
 		}
 		var piecesFound = 0;
-		var abort = false;
-		cursor.each( function ( err, piece ) {
-			if ( abort ) return;
-			if ( err ) {
-				abort = true;
-				// console.log( 'DB > ERR' );
-				return cb( err );
-			}
-			if ( !piece ) {
-				if ( piecesFound === pieces.length ) {
-					// console.log( 'DB > FOUND' );
-					return cb( null, unescapeKeys( JSON.parse( pieces.join( '' ) ) ), key, meta );
-				} else {
-					var err = new Error( 'Incomplete data found.' );
-					err.key = k;
-					// console.log( 'DB > ERR' );
-					return cb( err );
-				}
-			}
-
+		cursor.forEach( piece => {
 			( function next( startIdx ) {
 				var idx = pieces.indexOf( piece.key, startIdx );
 				if ( ~idx ) {
@@ -333,6 +314,20 @@ MongoTransport.prototype.getPieces = function ( pieces, cb, key, meta ) {
 					next( idx+1 );
 				}
 			})( 0 );
+		}, err => {
+			if ( err ) {
+				// console.log( 'DB > ERR' );
+				return cb( err );
+			}
+			if ( piecesFound === pieces.length ) {
+				// console.log( 'DB > FOUND' );
+				return cb( null, unescapeKeys( JSON.parse( pieces.join( '' ) ) ), key, meta );
+			} else {
+				var err = new Error( 'Incomplete data found.' );
+				err.key = k;
+				// console.log( 'DB > ERR' );
+				return cb( err );
+			}
 		});
 	});
 };
@@ -451,7 +446,6 @@ MongoTransport.prototype.checkDependencies = function ( ) {
 
 		// console.log( '~~~ checking dependencies' );
 		var cursor = self.collection.find( { dependencies: { $exists: true, $ne: [] } }, { projection: { key: 1, dependencies: 1, _id: 0 } } );
-		var abort = false;
 		var hadAny = false;
 		var hadFailures = false;
 		var remaining = 0;
@@ -483,19 +477,7 @@ MongoTransport.prototype.checkDependencies = function ( ) {
 				});
 			}
 		};
-		cursor.each( function ( err, d ) {
-			if ( err ) {
-				return self.emit( 'error', err );
-			}
-			if ( !d ) {
-				if ( hadAny ) {
-					checker.run( );
-				} else if ( self.dependencyCheckCallback ) {
-					self.dependencyCheckCallback( );
-				}
-				return;
-			}
-
+		cursor.forEach( d => {
 			hadAny = true;
 			remaining++;
 			var innerDependencyCounter = d.dependencies.length;
@@ -522,6 +504,15 @@ MongoTransport.prototype.checkDependencies = function ( ) {
 					}
 				});
 			});
+		}, err => {
+			if ( err ) {
+				return self.emit( 'error', err );
+			}
+			if ( hadAny ) {
+				checker.run( );
+			} else if ( self.dependencyCheckCallback ) {
+				self.dependencyCheckCallback( );
+			}
 		});
 	});
 };
