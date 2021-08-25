@@ -409,7 +409,7 @@ MongoTransport.prototype.findBy = function ( search, cb ) {
 	var arr = [];
 	var i = 0;
 	var done = false;
-	this.collection.find( flatten( search ), { value: 1, _id: 0 } ).each( function ( err, d ) {
+	this.collection.find( flatten( search ), { projection: { value: 1, _id: 0 } } ).each( function ( err, d ) {
 		if ( done ) return;
 		if ( err || !d ) {
 			done = true;
@@ -455,7 +455,7 @@ MongoTransport.prototype.checkDependencies = function ( ) {
 		if ( !runCheck ) return;
 
 		// console.log( '~~~ checking dependencies' );
-		var cursor = self.collection.find( { dependencies: { $exists: true, $ne: [] } }, { key: 1, dependencies: 1, _id: 0 } );
+		var cursor = self.collection.find( { dependencies: { $exists: true, $ne: [] } }, { projection: { key: 1, dependencies: 1, _id: 0 } } );
 		var abort = false;
 		var hadAny = false;
 		var hadFailures = false;
