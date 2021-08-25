@@ -406,17 +406,12 @@ MongoTransport.prototype.getAll = function ( keys, cb ) {
 };
 
 MongoTransport.prototype.findBy = function ( search, cb ) {
-	var arr = [];
-	var i = 0;
-	var done = false;
-	this.collection.find( flatten( search ), { projection: { value: 1, _id: 0 } } ).each( function ( err, d ) {
-		if ( done ) return;
-		if ( err || !d ) {
-			done = true;
-			cb( err, arr );
-		} else {
-			arr[ i++ ] = d.value;
+	this.collection.find( flatten( search ), { projection: { value: 1, _id: 0 } } ).toArray( ( err, arr ) => {
+		if ( err ) {
+			return cb( err );
 		}
+
+		cb( null, arr.map( d => d.value ) );
 	});
 };
 
