@@ -26,6 +26,7 @@ function KVStore ( transports ) {
 util.inherits( KVStore, EventEmitter );
 
 KVStore.prototype.addTransport = function ( name, transport ) {
+	var self = this;
 	if ( !( transport instanceof Transport ) ) {
 		throw new IllegalArgumentError( 'Transport must be an instance of Transport.' );
 	}
@@ -33,6 +34,11 @@ KVStore.prototype.addTransport = function ( name, transport ) {
 	this.transports[ name ] = transport;
 	transport.on( 'error', function ( err ) {
 		console.error( 'Error in KVStore[', name, '] ->', err );
+	});
+	transport.on( 'ready', function ( ) {
+		if ( self.ready( ) ) {
+			self.emit( 'ready' );
+		}
 	});
 	var priorityIndex = _.findIndex( this.priorityList, function ( t ) {
 		return t.transport.priority > transport.priority;

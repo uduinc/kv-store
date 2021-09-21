@@ -7,6 +7,15 @@ function Transport ( opts ) {
 	opts = opts || {};
 	this.priority = opts.priority || Transport.PRIORITY_MEDIUM;
 	Object.defineProperty( this, 'empty', { get: function ( ) { return !this.__numWaiting } } );
+	Object.defineProperty( this, 'ready', {
+		get: function ( ) { return !!this.__ready },
+		set: function ( isReady ) {
+			if ( isReady && !this.__ready ) {
+				this.__ready = true;
+				this.emit( 'ready' );
+			}
+		}
+	});
 	this.__numWaiting = 0;
 }
 
