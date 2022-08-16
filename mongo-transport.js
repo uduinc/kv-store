@@ -228,9 +228,15 @@ MongoTransport.prototype.set = function ( k, v, opts, cb ) {
 
 	// NOTE: Dependencies are an AND requirement -- ALL dependencies must be met for the document to remain
 	if ( opts.dependencies && _.size( opts.dependencies ) ) {
-		obj.dependencies = _.mapKeys( opts.dependencies, function ( v, k ) {
-			return k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT );
-		});
+		obj.dependencies = {};
+
+		for ( let k in opts.dependencies ) {
+			let v = opts.dependencies[ k ];
+			if ( v === '$$KEY' ) {
+				v = obj.key;
+			}
+			obj.dependencies[ k.replace( /\./g, DOT_SEPARATOR_REPLACEMENT ) ] = v;
+		}
 
 		if ( opts.skipInitialDependencyCheck ) {
 			setInternal( );
