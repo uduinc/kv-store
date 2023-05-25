@@ -45,9 +45,9 @@ function MongoTransport ( opts ) {
 		self.db = opts.db;
 		self.collection = self.db.collection( self.collectionName );
 		self.collection.createIndexes([
-			{ key: { key: 1 }, unique: true, background: true },
-			{ key: { expiration: 1 }, expireAfterSeconds: 0, sparse: true, background: true },
-			{ key: { dependencies: 1 }, sparse: true, background: true }
+			{ key: { key: 1 }, unique: true },
+			{ key: { expiration: 1 }, expireAfterSeconds: 0, sparse: true },
+			{ key: { dependencies: 1 }, sparse: true }
 		], function ( err ) {
 			if ( err ) {
 				throw err;
