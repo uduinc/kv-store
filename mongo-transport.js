@@ -2,7 +2,7 @@ var util = require( 'util' );
 var EventEmitter = require( 'events' ).EventEmitter;
 
 var _ = require( 'lodash' );
-var mongo = require( 'mongodb' ).MongoClient;
+var { MongoClient } = require( 'mongodb' );
 var objhash = require( 'node-object-hash' )( { coerce: false } ).hash;
 
 var utils = require( './utils' );
@@ -57,26 +57,21 @@ function MongoTransport ( opts ) {
 			self.dependencyInterval = setInterval( self.checkDependencies.bind( self ), opts.dependencyInterval );
 		});
 	} else if ( opts.connection_string ) {
-		mongo.connect( opts.connection_string, function ( err, db ) {
+		const client = new MongoClient( opts.connection_string );
+		self.db = client.db( );
+		self.collection = self.db.collection( self.collectionName );
+
+		self.collection.createIndexes([
+			{ key: { key: 1 }, unique: true, background: true },
+			{ key: { expiration: 1 }, expireAfterSeconds: 0, sparse: true, background: true },
+			{ key: { dependencies: 1 }, sparse: true, background: true }
+		], function ( err ) {
 			if ( err ) {
 				throw err;
 			}
 
-			self.db = db;
-			self.collection = db.collection( self.collectionName );
-
-			self.collection.createIndexes([
-				{ key: { key: 1 }, unique: true, background: true },
-				{ key: { expiration: 1 }, expireAfterSeconds: 0, sparse: true, background: true },
-				{ key: { dependencies: 1 }, sparse: true, background: true }
-			], function ( err ) {
-				if ( err ) {
-					throw err;
-				}
-
-				self.ready = true;
-				self.dependencyInterval = setInterval( self.checkDependencies.bind( self ), opts.dependencyInterval );
-			});
+			self.ready = true;
+			self.dependencyInterval = setInterval( self.checkDependencies.bind( self ), opts.dependencyInterval );
 		});
 	} else {
 		throw new IllegalArgumentError( 'MongoTransport requires either an existing db connection or a connection string' );
@@ -305,36 +300,30 @@ MongoTransport.prototype.addDependencies = function ( k, dependencies, cb ) {
 };
 
 MongoTransport.prototype.getPieces = function ( pieces, cb, key, meta ) {
-	this.collection.find( { key: { $in: pieces } }, function ( err, cursor ) {
+	var piecesFound = 0;
+	this.collection.find( { key: { $in: pieces } } ).forEach( piece => {
+		( function next( startIdx ) {
+			var idx = pieces.indexOf( piece.key, startIdx );
+			if ( ~idx ) {
+				pieces[ idx ] = piece.value;
+				piecesFound++;
+				next( idx+1 );
+			}
+		})( 0 );
+	}, err => {
 		if ( err ) {
 			// console.log( 'DB > ERR' );
 			return cb( err );
 		}
-		var piecesFound = 0;
-		cursor.forEach( piece => {
-			( function next( startIdx ) {
-				var idx = pieces.indexOf( piece.key, startIdx );
-				if ( ~idx ) {
-					pieces[ idx ] = piece.value;
-					piecesFound++;
-					next( idx+1 );
-				}
-			})( 0 );
-		}, err => {
-			if ( err ) {
-				// console.log( 'DB > ERR' );
-				return cb( err );
-			}
-			if ( piecesFound === pieces.length ) {
-				// console.log( 'DB > FOUND' );
-				return cb( null, unescapeKeys( JSON.parse( pieces.join( '' ) ) ), key, meta );
-			} else {
-				var err = new Error( 'Incomplete data found.' );
-				err.key = k;
-				// console.log( 'DB > ERR' );
-				return cb( err );
-			}
-		});
+		if ( piecesFound === pieces.length ) {
+			// console.log( 'DB > FOUND' );
+			return cb( null, unescapeKeys( JSON.parse( pieces.join( '' ) ) ), key, meta );
+		} else {
+			var err = new Error( 'Incomplete data found.' );
+			err.key = k;
+			// console.log( 'DB > ERR' );
+			return cb( err );
+		}
 	});
 };
 
@@ -348,20 +337,20 @@ MongoTransport.prototype.get = function ( k, cb ) {
 	var self = this;
 	var wait = self._currentlySaving[ k ] || Promise.resolve( );
 	wait.catch( () => {} ).then( () => {
-		self.collection.findOne( { key: k }, function ( err, data ) {
-			if ( err || !data ) {
-				// console.log( 'DB >', err ? 'ERR' : '<EMPTY>' );
-				cb( err );
+		self.collection.findOne( { key: k } ).then( function ( data ) {
+			if ( !data ) {
+				// console.log( 'DB > <EMPTY>' );
+				cb( null );
 			} else {
 				if ( data.piece_split ) {
 					self.getPieces( data.value, cb, k, data.meta );
 				} else {
 					// console.log( 'DB >', data.value );
 					// console.log( 'DB > FOUND' );
-					cb( err, unescapeKeys( data.value ), k, data.meta );
+					cb( null, unescapeKeys( data.value ), k, data.meta );
 				}
 			}
-		});
+		}, cb );
 	});
 };
 
@@ -370,9 +359,9 @@ MongoTransport.prototype.getAll = function ( keys, cb ) {
 	const waiting = keys.filter( k => this._currentlySaving[ k ] ).map( k => this._currentlySaving[ k ] );
 
 	Promise.all( waiting ).catch( () => {} ).then( () => {
-		self.collection.find( { key: { $in: keys } } ).toArray( function ( err, data ) {
-			if ( err || !data.length) {
-				return cb( err, {} );
+		self.collection.find( { key: { $in: keys } } ).toArray( ).then( function ( data ) {
+			if ( !data.length) {
+				return cb( null, {} );
 			}
 
 			var returnData = {};
@@ -402,18 +391,14 @@ MongoTransport.prototype.getAll = function ( keys, cb ) {
 				}
 			});
 			checkDone( );
-		});
+		}, cb );
 	});
 };
 
 MongoTransport.prototype.findBy = function ( search, cb ) {
-	this.collection.find( flatten( search ), { projection: { value: 1, _id: 0 } } ).toArray( ( err, arr ) => {
-		if ( err ) {
-			return cb( err );
-		}
-
+	this.collection.find( flatten( search ), { projection: { value: 1, _id: 0 } } ).toArray( ).then( arr => {
 		cb( null, arr.map( d => d.value ) );
-	});
+	}, cb );
 };
 
 MongoTransport.prototype.delete = function ( k, cb ) {
@@ -425,20 +410,14 @@ MongoTransport.prototype.delete = function ( k, cb ) {
 
 	var self = this;
 
-	self.collection.findOne( { key: k }, { projection: { piece_split: 1 } }, function ( err, data ) {
-		if ( err ) {
-			if ( cb ) {
-				cb( err );
-			}
-			return;
-		}
+	self.collection.findOne( { key: k }, { projection: { piece_split: 1 } } ).then( function ( data ) {
 		if ( data && data.piece_split ) {
 			var pieces = data.value.concat( k );
 			self.collection.deleteMany( { key: { $in: data.value.concat( k ) } }, callback );
 		} else {
 			self.collection.deleteOne( { key: k }, callback );
 		}
-	});
+	}, callback );
 };
 
 MongoTransport.prototype.deleteBy = function ( search, cb ) {
